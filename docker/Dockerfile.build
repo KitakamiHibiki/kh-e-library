@@ -1,0 +1,26 @@
+﻿# Build stage — 编译源代码
+FROM golang:1.25-alpine AS builder
+
+ARG E_LIBRARY_VERSION=v0.0.1
+
+WORKDIR /app
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ .
+RUN CGO_ENABLED=1 go build -ldflags="-s -w -X main.Version=${E_LIBRARY_VERSION}" -o /server ./cmd/server
+
+# Runtime stage
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates sqlite-libs
+
+WORKDIR /app
+COPY --from=builder /server .
+
+EXPOSE 14325
+
+VOLUME ["/app/data"]
+
+LABEL version=${E_LIBRARY_VERSION}
+
+ENTRYPOINT ["/app/server"]

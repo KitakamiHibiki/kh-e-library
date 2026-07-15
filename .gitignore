@@ -1,0 +1,41 @@
+﻿# --- Go ---
+backend/kh-e-library
+backend/kh-e-library.exe
+backend/tmp/
+
+# --- Node / Vue ---
+client/web/node_modules/
+client/web/dist/
+client/web/.env
+client/web/.env.local
+
+# --- Android ---
+client/Android/.gradle/
+client/Android/build/
+client/Android/app/build/
+client/Android/local.properties
+client/Android/*.iml
+client/Android/.idea/
+client/Android/captures/
+client/Android/.externalNativeBuild/
+
+# --- IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Project data (local dev) ---
+**/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# --- Build artifacts ---
+
+

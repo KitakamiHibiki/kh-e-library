@@ -1,0 +1,193 @@
+﻿name: Build & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  VERSION_FILE: VERSION
+
+jobs:
+  backend:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            cc: gcc
+            cgo: 1
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            cc: aarch64-linux-gnu-gcc
+            cgo: 1
+            deps: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          - os: ubuntu-latest
+            goos: windows
+            goarch: amd64
+            cc: x86_64-w64-mingw32-gcc
+            cgo: 1
+            deps: gcc-mingw-w64-x86-64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross-compilers
+        if: matrix.deps
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.deps }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: client/web/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd client/web
+          npm ci
+          npm run build
+
+      - name: Copy frontend dist to backend
+        run: |
+          mkdir -p backend/web/dist
+          cp -r client/web/dist/* backend/web/dist/
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.cc }}
+          CGO_ENABLED: ${{ matrix.cgo }}
+        run: |
+          cd backend
+          VERSION=$(cat ../${{ env.VERSION_FILE }})
+          ext=""
+          [ "${{ matrix.goos }}" = "windows" ] && ext=".exe"
+          binary="kh-e-library-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
+          go build -ldflags="-s -w -X main.Version=${VERSION}" -o "${binary}" ./cmd/server
+          echo "binary=${binary}" >> $GITHUB_ENV
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.binary }}
+          path: backend/${{ env.binary }}
+          if-no-files-found: error
+
+  backend-darwin:
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: client/web/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd client/web
+          npm ci
+          npm run build
+
+      - name: Copy frontend dist to backend
+        run: |
+          mkdir -p backend/web/dist
+          cp -r client/web/dist/* backend/web/dist/
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Build binary
+        env:
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+        run: |
+          cd backend
+          VERSION=$(cat ../${{ env.VERSION_FILE }})
+          binary="kh-e-library-darwin-${{ matrix.goarch }}"
+          go build -ldflags="-s -w -X main.Version=${VERSION}" -o "${binary}" ./cmd/server
+          echo "binary=${binary}" >> $GITHUB_ENV
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.binary }}
+          path: backend/${{ env.binary }}
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-latest
+    if: hashFiles('client/android/build.gradle*', 'client/android/app/build.gradle*') != ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Android APK
+        run: |
+          cd client/android
+          chmod +x gradlew 2>/dev/null || true
+          ./gradlew assembleRelease 2>/dev/null || echo "Gradle wrapper not found, skipping"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: client/android/app/build/outputs/apk/release/*.apk
+        continue-on-error: true
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [backend, backend-darwin, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p assets
+          find artifacts -type f | while read f; do
+            cp "$f" assets/
+          done
+          ls -la assets/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*
+          generate_release_notes: true

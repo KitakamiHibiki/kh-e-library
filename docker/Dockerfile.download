@@ -1,0 +1,20 @@
+﻿# 从 GitHub Releases 下载预编译二进制
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates sqlite-libs curl
+
+WORKDIR /app
+
+ARG E_LIBRARY_VERSION=v0.0.1
+RUN curl -fsSL -o e-library \
+  "https://github.com/kitakami-hibiki/e-library/releases/download/${E_LIBRARY_VERSION}/e-library-linux-amd64" && \
+  chmod +x e-library
+
+EXPOSE 14325
+
+VOLUME ["/app/data"]
+
+ENTRYPOINT ["/app/e-library"]
+
+
+LABEL version=
