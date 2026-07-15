@@ -1,4 +1,4 @@
-﻿# --- Go ---
+# --- Go ---
 backend/kh-e-library
 backend/kh-e-library.exe
 backend/tmp/
@@ -10,14 +10,14 @@ client/web/.env
 client/web/.env.local
 
 # --- Android ---
-client/Android/.gradle/
-client/Android/build/
-client/Android/app/build/
-client/Android/local.properties
-client/Android/*.iml
-client/Android/.idea/
-client/Android/captures/
-client/Android/.externalNativeBuild/
+client/android/.gradle/
+client/android/build/
+client/android/app/build/
+client/android/local.properties
+client/android/*.iml
+client/android/.idea/
+client/android/captures/
+client/android/.externalNativeBuild/
 
 # --- IDE ---
 .idea/
@@ -37,5 +37,5 @@ Thumbs.db
 *.db-shm
 
 # --- Build artifacts ---
-
-
+backend/web/dist/*
+!backend/web/dist/index.html
