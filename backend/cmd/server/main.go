@@ -50,6 +50,7 @@ func main() {
 		api.PUT("/books/:id", bookHandler.Update)
 		api.DELETE("/books/:id", bookHandler.Delete)
 		api.GET("/books/:id/read", bookHandler.Read)
+		api.GET("/books/:id/cover", bookHandler.Cover)
 
 		api.GET("/books/:id/progress", readingHandler.GetProgress)
 		api.PUT("/books/:id/progress", readingHandler.SaveProgress)
