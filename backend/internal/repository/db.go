@@ -14,7 +14,6 @@ import (
 var DB *gorm.DB
 
 func InitDB(dsn string) {
-	// 确保数据库目录存在
 	dir := filepath.Dir(dsn)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Fatalf("failed to create database directory: %v", err)
@@ -32,6 +31,7 @@ func InitDB(dsn string) {
 		&model.Book{},
 		&model.ReadingProgress{},
 		&model.Bookmark{},
+		&model.Setting{},
 	); err != nil {
 		log.Fatalf("failed to migrate database: %v", err)
 	}

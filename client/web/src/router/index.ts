@@ -14,6 +14,11 @@ const router = createRouter({
       name: 'reader',
       component: () => import('@/views/Reader.vue'),
     },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('@/views/Settings.vue'),
+    },
   ],
 })
 
