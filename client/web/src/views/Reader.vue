@@ -19,6 +19,7 @@ const currentPage = ref(1)
 const totalPages = ref(0)
 const pdfCanvas = ref<HTMLCanvasElement | null>(null)
 
+const zoomLevel = ref(100)
 let rendition: any = null
 let book: any = null
 let pdfDoc: any = null
@@ -71,9 +72,10 @@ const renderPage = async (pageNum: number) => {
   const ctx = canvas.getContext("2d")
   if (!ctx) return
 
-  const containerWidth = canvas.parentElement?.clientWidth || 800
   const vp = page.getViewport({ scale: 1 })
-  const scale = containerWidth / vp.width
+  const availHeight = window.innerHeight - 130
+  const fitScale = availHeight / vp.height
+  const scale = fitScale * zoomLevel.value / 100
   const svp = page.getViewport({ scale })
 
   canvas.width = svp.width
@@ -96,6 +98,10 @@ const nextPage = () => {
   currentPage.value++
   renderPage(currentPage.value)
 }
+
+const zoomIn = () => { zoomLevel.value = Math.min(300, zoomLevel.value + 10); renderPage(currentPage.value) }
+const zoomOut = () => { zoomLevel.value = Math.max(25, zoomLevel.value - 10); renderPage(currentPage.value) }
+const resetZoom = () => { zoomLevel.value = 100; renderPage(currentPage.value) }
 
 const goToPage = () => {
   if (!pdfDoc) return
@@ -171,6 +177,9 @@ const handleKey = (e: KeyboardEvent) => {
   if (!isPdf.value) return
   if (e.key === "ArrowLeft") { prevPage(); e.preventDefault() }
   if (e.key === "ArrowRight") { nextPage(); e.preventDefault() }
+  if (e.ctrlKey && (e.key === "=" || e.key === "+")) { zoomIn(); e.preventDefault() }
+  if (e.ctrlKey && e.key === "-") { zoomOut(); e.preventDefault() }
+  if (e.ctrlKey && e.key === "0") { resetZoom(); e.preventDefault() }
 }
 
 onMounted(() => {
@@ -198,13 +207,18 @@ onBeforeUnmount(() => {
     <div style="flex: 1; position: relative; overflow: auto">
       <div v-if="loading" style="display: flex; justify-content: center; align-items: center; height: 100%"><span>loading book...</span></div>
       <div v-if="!isPdf && !loading" id="reader-area" style="height: 100%"></div>
-      <div v-if="isPdf && !loading" style="display: flex; flex-direction: column; align-items: center; padding: 16px">
-        <canvas ref="pdfCanvas" style="max-width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.15)"></canvas>
+      <div v-if="isPdf && !loading" style="display: flex; flex-direction: column; align-items: center; overflow: auto; flex: 1">
+        <canvas ref="pdfCanvas" style="box-shadow: 0 2px 8px rgba(0,0,0,0.15)"></canvas>
         <div style="display: flex; align-items: center; gap: 8px; margin-top: 12px">
           <el-button size="small" :disabled="currentPage <= 1" @click="prevPage">Prev</el-button>
           <el-input-number v-model="currentPage" :min="1" :max="totalPages" size="small" controls-position="right" style="width: 130px" @change="goToPage" />
           <span style="font-size: 0.85rem">/ {{ totalPages }}</span>
           <el-button size="small" :disabled="currentPage >= totalPages" @click="nextPage">Next</el-button>
+          <span style="flex:1"></span>
+          <el-button size="small" @click="zoomOut" :disabled="zoomLevel <= 25">-</el-button>
+          <span style="font-size:0.85rem;min-width:40px;text-align:center">{{ zoomLevel }}%</span>
+          <el-button size="small" @click="zoomIn" :disabled="zoomLevel >= 300">+</el-button>
+          <el-button v-if="zoomLevel !== 100" size="small" @click="resetZoom">Fit</el-button>
         </div>
       </div>
     </div>

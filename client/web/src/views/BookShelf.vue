@@ -93,3 +93,14 @@ onMounted(fetchBooks)
     </el-main>
   </el-container>
 </template>
+
+<style scoped>
+.book-card { cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; }
+.book-card:hover { transform: translateY(-2px); }
+.book-cover { aspect-ratio: 3/4; background: #f5f5f5; border-radius: 4px; margin-bottom: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.book-cover img { width: 100%; height: 100%; object-fit: cover; }
+.book-title { margin: 0 0 4px; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.book-author { margin: 0; color: #999; font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.el-header { display: flex; align-items: center; border-bottom: 1px solid #e0e0e0; }
+</style>
+
