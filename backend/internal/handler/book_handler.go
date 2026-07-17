@@ -3,14 +3,17 @@
 import (
 	"bytes"
 	"fmt"
+	"image/jpeg"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kitakami-hibiki/e-library/internal/config"
 	"github.com/kitakami-hibiki/e-library/internal/epub"
+	"github.com/gen2brain/go-fitz"
 	"github.com/kitakami-hibiki/e-library/internal/model"
 	"github.com/kitakami-hibiki/e-library/internal/service"
 )
@@ -75,8 +78,8 @@ func (h *BookHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	// parse EPUB metadata and extract cover
-	go func() {
+	if strings.ToLower(filepath.Ext(book.FilePath)) == ".epub" {
+		go func() {
 		data, err := os.ReadFile(book.FilePath)
 		if err != nil {
 			return
@@ -103,6 +106,15 @@ func (h *BookHandler) Upload(c *gin.Context) {
 			h.svc.Update(book)
 		}
 	}()
+	} else if strings.ToLower(filepath.Ext(book.FilePath)) == ".pdf" {
+		go func() {
+			coverPath, coverErr := extractPDFCover(book.FilePath, book.ID)
+			if coverErr == nil {
+				book.CoverPath = coverPath
+				h.svc.Update(book)
+			}
+		}()
+	}
 
 	c.JSON(http.StatusCreated, gin.H{"data": book})
 }
@@ -156,7 +168,10 @@ func (h *BookHandler) Read(c *gin.Context) {
 		return
 	}
 	defer reader.Close()
-	c.DataFromReader(http.StatusOK, book.FileSize, "application/epub+zip", reader, nil)
+		ext := strings.ToLower(filepath.Ext(book.FilePath))
+	ct := "application/epub+zip"
+	if ext == ".pdf" { ct = "application/pdf" }
+	c.DataFromReader(http.StatusOK, book.FileSize, ct, reader, nil)
 }
 
 func (h *BookHandler) Cover(c *gin.Context) {
@@ -171,4 +186,36 @@ func (h *BookHandler) Cover(c *gin.Context) {
 		return
 	}
 	c.File(book.CoverPath)
+}
+
+
+
+func extractPDFCover(path string, bookID uint) (string, error) {
+	doc, err := fitz.New(path)
+	if err != nil {
+		return "", fmt.Errorf("open pdf: %w", err)
+	}
+	defer doc.Close()
+
+	img, err := doc.Image(0)
+	if err != nil {
+		return "", fmt.Errorf("render page 0: %w", err)
+	}
+
+	ext := ".jpg"
+	coversDir := filepath.Join(filepath.Dir(config.DatabasePath()), "covers")
+	os.MkdirAll(coversDir, 0755)
+	coverPath := filepath.Join(coversDir, fmt.Sprintf("%d%s", bookID, ext))
+
+	f, err := os.Create(coverPath)
+	if err != nil {
+		return "", fmt.Errorf("create cover file: %w", err)
+	}
+	defer f.Close()
+
+	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: 80}); err != nil {
+		return "", fmt.Errorf("encode jpeg: %w", err)
+	}
+
+	return coverPath, nil
 }

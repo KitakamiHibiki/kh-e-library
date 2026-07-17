@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -35,8 +36,8 @@ func (s *BookService) GetByID(id uint) (*model.Book, error) {
 
 func (s *BookService) Upload(filename string, reader io.Reader) (*model.Book, error) {
 	ext := filepath.Ext(filename)
-	if ext != ".epub" {
-		return nil, fmt.Errorf("unsupported file type: %s, only EPUB allowed", ext)
+	if ext != ".epub" && ext != ".pdf" {
+		return nil, fmt.Errorf("unsupported file type: %s, only EPUB and PDF allowed", ext)
 	}
 
 	path, size, err := s.storage.Save(filename, reader)
@@ -45,7 +46,7 @@ func (s *BookService) Upload(filename string, reader io.Reader) (*model.Book, er
 	}
 
 	book := &model.Book{
-		Title:      filename,
+		Title:      strings.TrimSuffix(filename, filepath.Ext(filename)),
 		FilePath:   path,
 		FileSize:   size,
 		StorageKey: "local",

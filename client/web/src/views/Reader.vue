@@ -4,12 +4,13 @@ import { useRoute, useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
 import {
   getBook, getReadUrl, getProgress, saveProgress,
-  getBookmarks, createBookmark, deleteBookmark
+  getBookmarks, createBookmark, deleteBookmark, getReadUrl
 } from "@/api"
 
 const route = useRoute()
 const router = useRouter()
 const bookId = Number(route.params.id)
+const isPdf = ref(false)
 
 const loading = ref(true)
 const progressVal = ref(0)
@@ -25,6 +26,8 @@ const initReader = async () => {
   try {
     const bookRes = await getBook(bookId)
     bookTitle.value = bookRes.data.data.title || ""
+    isPdf.value = (bookRes.data.data.file_path || "").toLowerCase().endsWith(".pdf")
+    if (isPdf.value) { loading.value = false; return }
 
     // load progress
     const progRes = await getProgress(bookId)
@@ -118,9 +121,9 @@ onBeforeUnmount(() => {
     <div style="display: flex; align-items: center; padding: 6px 12px; border-bottom: 1px solid #e0e0e0; background: #fff; z-index: 10; gap: 8px; flex-shrink: 0">
       <el-button size="small" @click="router.push('/')">back</el-button>
       <span style="font-size: 0.9rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ bookTitle }}</span>
-      <span style="font-size: 0.8rem; color: #666">{{ Math.round(progressVal * 100) }}%</span>
-      <el-button size="small" @click="addBookmark">+ bookmark</el-button>
-      <el-button size="small" :type="showBookmarks ? 'primary' : 'default'" @click="showBookmarks = !showBookmarks">
+      <span v-if="!isPdf" style="font-size: 0.8rem; color: #666">{{ Math.round(progressVal * 100) }}%</span>
+      <el-button v-if="!isPdf" size="small" @click="addBookmark">+ bookmark</el-button>
+      <el-button v-if="!isPdf" size="small" :type="showBookmarks ? 'primary' : 'default'" @click="showBookmarks = !showBookmarks">
         bookmarks ({{ bookmarks.length }})
       </el-button>
     </div>
@@ -131,7 +134,8 @@ onBeforeUnmount(() => {
         <el-icon class="is-loading" :size="32"><i class="el-icon-loading"></i></el-icon>
         <span style="margin-left: 8px">loading book...</span>
       </div>
-      <div id="reader-area" style="height: 100%"></div>
+      <iframe v-if="isPdf" :src="getReadUrl(bookId)" style="width: 100%; height: 100%; border: none"></iframe>
+      <div v-else id="reader-area" style="height: 100%"></div>
     </div>
 
     <!-- bookmarks panel -->

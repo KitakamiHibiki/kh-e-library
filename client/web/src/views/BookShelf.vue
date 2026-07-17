@@ -55,7 +55,7 @@ onMounted(fetchBooks)
           <el-input v-model="keyword" placeholder="search by title or author..." clearable @clear="fetchBooks" @keyup.enter="fetchBooks" />
         </el-col>
         <el-col :span="4" style="text-align: right">
-          <el-upload :show-file-list="false" :http-request="handleUpload" accept=".epub">
+          <el-upload :show-file-list="false" :http-request="handleUpload" accept=".epub,.pdf">
             <el-button type="primary">upload EPUB</el-button>
           </el-upload>
         </el-col>
@@ -73,7 +73,8 @@ onMounted(fetchBooks)
           <el-card :body-style="{ padding: "12px" }" shadow="hover" style="cursor: pointer" @click="$router.push('/read/' + book.id)">
             <div style="aspect-ratio: 3/4; background: #f5f5f5; border-radius: 4px; margin-bottom: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center">
               <img v-if="book.cover_path" :src="getCoverUrl(book.id)" @error="(e:any)=>(e.target.src='')" style="width: 100%; height: 100%; object-fit: cover" />
-              <span v-else style="color: #999; font-size: 2rem">+</span>
+              <span v-if="book.file_path?.toLowerCase().endsWith('.pdf')" style="color: #e74c3c; font-size: 0.85rem; font-weight: bold">PDF</span>
+            <span v-else style="color: #999; font-size: 2rem">+</span>
             </div>
             <h4 style="margin: 0 0 4px; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ book.title }}</h4>
             <p style="margin: 0; color: #999; font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ book.author || "unknown author" }}</p>

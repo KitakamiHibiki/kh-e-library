@@ -1,6 +1,8 @@
 ﻿# Build stage — 编译源代码
 FROM golang:1.25-alpine AS builder
 
+RUN apk add --no-cache mupdf-dev gcc musl-dev
+
 ARG E_LIBRARY_VERSION=v0.0.1
 
 WORKDIR /app
