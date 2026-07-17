@@ -14,7 +14,8 @@
     "element-plus": "^2.9.0",
     "@element-plus/icons-vue": "^2.3.0",
     "axios": "^1.7.0",
-    "epubjs": "^0.3.93"
+    "epubjs": "^0.3.93",
+    "pdfjs-dist": "^4.0.379"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.0",
