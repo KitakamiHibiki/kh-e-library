@@ -1,4 +1,4 @@
-﻿name: Build & Release
+name: Build & Release
 
 on:
   push:
@@ -55,6 +55,7 @@ jobs:
 
       - name: Copy frontend dist to backend
         run: |
+          rm -rf backend/web/dist
           mkdir -p backend/web/dist
           cp -r client/web/dist/* backend/web/dist/
 
@@ -110,6 +111,7 @@ jobs:
 
       - name: Copy frontend dist to backend
         run: |
+          rm -rf backend/web/dist
           mkdir -p backend/web/dist
           cp -r client/web/dist/* backend/web/dist/
 
@@ -141,7 +143,7 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
-    if: hashFiles('client/android/build.gradle*', 'client/android/app/build.gradle*') != ''
+    if: ${{ hashFiles('client/android/build.gradle*', 'client/android/app/build.gradle*') != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -191,3 +193,4 @@ jobs:
         with:
           files: assets/*
           generate_release_notes: true
+
