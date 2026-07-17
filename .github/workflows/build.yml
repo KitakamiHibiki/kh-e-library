@@ -44,8 +44,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
-          cache-dependency-path: client/web/package-lock.json
+          # 临时: package-lock.json 尚不存在时跳过缓存失败
 
       - name: Build frontend
         run: |
@@ -100,8 +99,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
-          cache-dependency-path: client/web/package-lock.json
+          # 临时: package-lock.json 尚不存在时跳过缓存失败
 
       - name: Build frontend
         run: |
