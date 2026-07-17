@@ -22,6 +22,8 @@ const fetchBooks = async () => {
   }
 }
 
+const coverError = (e: Event) => { (e.target as HTMLImageElement).src = "" }
+
 const handleUpload = async (options: any) => {
   try {
     await uploadBook(options.file)
@@ -72,7 +74,7 @@ onMounted(fetchBooks)
         <el-col v-for="book in books" :key="book.id" :xs="12" :sm="8" :md="6" :lg="4" style="margin-bottom: 16px">
           <el-card :body-style="{ padding: "12px" }" shadow="hover" style="cursor: pointer" @click="$router.push('/read/' + book.id)">
             <div style="aspect-ratio: 3/4; background: #f5f5f5; border-radius: 4px; margin-bottom: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center">
-              <img v-if="book.cover_path" :src="getCoverUrl(book.id)" @error="(e:any)=>(e.target.src='')" style="width: 100%; height: 100%; object-fit: cover" />
+              <img v-if="book.cover_path" :src="getCoverUrl(book.id)" @error="coverError" style="width: 100%; height: 100%; object-fit: cover" />
               <span v-if="book.file_path?.toLowerCase().endsWith('.pdf')" style="color: #e74c3c; font-size: 0.85rem; font-weight: bold">PDF</span>
             <span v-else style="color: #999; font-size: 2rem">+</span>
             </div>
