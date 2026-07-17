@@ -143,26 +143,38 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('client/android/build.gradle*', 'client/android/app/build.gradle*') != '' }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check Android source
+        id: check
+        run: |
+          if [ -f client/android/build.gradle ] || [ -f client/android/app/build.gradle ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up JDK 17
+        if: steps.check.outputs.exists == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Gradle
+        if: steps.check.outputs.exists == 'true'
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build Android APK
+        if: steps.check.outputs.exists == 'true'
         run: |
           cd client/android
           chmod +x gradlew 2>/dev/null || true
-          ./gradlew assembleRelease 2>/dev/null || echo "Gradle wrapper not found, skipping"
+          ./gradlew assembleRelease
 
       - name: Upload APK
+        if: steps.check.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
