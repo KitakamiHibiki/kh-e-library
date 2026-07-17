@@ -1,0 +1,22 @@
+# Server 配置
+server:
+  host: "0.0.0.0"
+  port: 14325
+
+# 数据库
+database:
+  # 支持 ~ 展开为用户主目录
+  path: "~/.kh/e-library/library.db"
+
+# 存储后端
+storage:
+  # "local" | "baidu"
+  driver: "local"
+
+  local:
+    books_dir: "~/.kh/e-library/books"
+
+  baidu:
+    client_id: ""
+    client_secret: ""
+    refresh_token: ""

@@ -1,14 +1,14 @@
 name: Build & Release
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
     branches: [main]
-
-permissions:
-  contents: write
 
 env:
   VERSION_FILE: VERSION
@@ -47,19 +47,23 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          # 临时: package-lock.json 尚不存在时跳过缓存失败
 
       - name: Build frontend
         run: |
-          cd client/web
-          npm install
-          npm run build
+          if [ -d client/web ]; then
+            cd client/web
+            npm install
+            npm run build
+          else
+            echo "client/web not found, skipping frontend"
+          fi
 
       - name: Copy frontend dist to backend
         run: |
-          rm -rf backend/web/dist
           mkdir -p backend/web/dist
-          cp -r client/web/dist/* backend/web/dist/
+          if [ -d client/web/dist ]; then
+            cp -r client/web/dist/* backend/web/dist/
+          fi
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -79,15 +83,29 @@ jobs:
           VERSION=$(cat ../${{ env.VERSION_FILE }})
           ext=""
           [ "${{ matrix.goos }}" = "windows" ] && ext=".exe"
-          binary="kh-e-library-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
+          binary="kh-e-library${ext}"
           go build -ldflags="-s -w -X main.Version=${VERSION}" -o "${binary}" ./cmd/server
           echo "binary=${binary}" >> $GITHUB_ENV
 
-      - name: Upload binary
+      - name: Package archive
+        run: |
+          cd backend
+          VERSION=$(cat ../${{ env.VERSION_FILE }})
+          cp application.yml .
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            archive="kh-e-library-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}.zip"
+            zip "${archive}" "${binary}" application.yml
+          else
+            archive="kh-e-library-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+            tar czf "${archive}" "${binary}" application.yml
+          fi
+          echo "archive=${archive}" >> $GITHUB_ENV
+
+      - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.binary }}
-          path: backend/${{ env.binary }}
+          name: ${{ env.archive }}
+          path: backend/${{ env.archive }}
           if-no-files-found: error
 
   backend-darwin:
@@ -102,19 +120,23 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          # 临时: package-lock.json 尚不存在时跳过缓存失败
 
       - name: Build frontend
         run: |
-          cd client/web
-          npm install
-          npm run build
+          if [ -d client/web ]; then
+            cd client/web
+            npm install
+            npm run build
+          else
+            echo "client/web not found, skipping frontend"
+          fi
 
       - name: Copy frontend dist to backend
         run: |
-          rm -rf backend/web/dist
           mkdir -p backend/web/dist
-          cp -r client/web/dist/* backend/web/dist/
+          if [ -d client/web/dist ]; then
+            cp -r client/web/dist/* backend/web/dist/
+          fi
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -131,22 +153,30 @@ jobs:
         run: |
           cd backend
           VERSION=$(cat ../${{ env.VERSION_FILE }})
-          binary="kh-e-library-darwin-${{ matrix.goarch }}"
+          binary="kh-e-library"
           go build -ldflags="-s -w -X main.Version=${VERSION}" -o "${binary}" ./cmd/server
           echo "binary=${binary}" >> $GITHUB_ENV
 
-      - name: Upload binary
+      - name: Package archive
+        run: |
+          cd backend
+          VERSION=$(cat ../${{ env.VERSION_FILE }})
+          cp application.yml .
+          archive="kh-e-library-${VERSION}-darwin-${{ matrix.goarch }}.tar.gz"
+          tar czf "${archive}" "${binary}" application.yml
+          echo "archive=${archive}" >> $GITHUB_ENV
+
+      - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.binary }}
-          path: backend/${{ env.binary }}
+          name: ${{ env.archive }}
+          path: backend/${{ env.archive }}
           if-no-files-found: error
 
   android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Check Android source
         id: check
         run: |
@@ -155,25 +185,21 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-
       - name: Set up JDK 17
         if: steps.check.outputs.exists == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-
       - name: Setup Gradle
         if: steps.check.outputs.exists == 'true'
         uses: gradle/actions/setup-gradle@v4
-
       - name: Build Android APK
         if: steps.check.outputs.exists == 'true'
         run: |
           cd client/android
           chmod +x gradlew 2>/dev/null || true
           ./gradlew assembleRelease
-
       - name: Upload APK
         if: steps.check.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
@@ -188,11 +214,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-
       - name: Prepare release assets
         run: |
           mkdir -p assets
@@ -200,10 +224,8 @@ jobs:
             cp "$f" assets/
           done
           ls -la assets/
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: assets/*
           generate_release_notes: true
-

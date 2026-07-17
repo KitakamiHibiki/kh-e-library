@@ -1,64 +1,105 @@
-﻿package config
+package config
 
 import (
+	"embed"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"gopkg.in/yaml.v3"
 )
 
-const dataDir = "~/.kh/e-library"
+//go:embed application.yml
+var defaultConfigYAML embed.FS
 
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Storage  StorageConfig
+	Server   ServerConfig   `yaml:"server"`
+	Database DatabaseConfig `yaml:"database"`
+	Storage  StorageConfig  `yaml:"storage"`
 }
 
 type ServerConfig struct {
-	Host string
-	Port int
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
 }
 
 type DatabaseConfig struct {
-	Path string
+	Path string `yaml:"path"`
 }
 
 type StorageConfig struct {
-	Driver string // "local" | "baidu"
-	Local  LocalStorageConfig
-	Baidu  BaiduStorageConfig
+	Driver string            `yaml:"driver"`
+	Local  LocalStorageConfig `yaml:"local"`
+	Baidu  BaiduStorageConfig `yaml:"baidu"`
 }
 
 type LocalStorageConfig struct {
-	BooksDir string
+	BooksDir string `yaml:"books_dir"`
 }
 
 type BaiduStorageConfig struct {
-	ClientID     string
-	ClientSecret string
-	RefreshToken string
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	RefreshToken string `yaml:"refresh_token"`
 }
 
 func Load() *Config {
-	return &Config{
-		Server: ServerConfig{
-			Host: getEnv("SERVER_HOST", "0.0.0.0"),
-			Port: getEnvInt("SERVER_PORT", 14325),
-		},
-		Database: DatabaseConfig{
-			Path: getEnv("DB_PATH", expandHome(filepath.Join(dataDir, "library.db"))),
-		},
-		Storage: StorageConfig{
-			Driver: getEnv("STORAGE_DRIVER", "local"),
-			Local: LocalStorageConfig{
-				BooksDir: getEnv("STORAGE_LOCAL_BOOKS_DIR", expandHome(filepath.Join(dataDir, "books"))),
-			},
-			Baidu: BaiduStorageConfig{
-				ClientID:     getEnv("BAIDU_CLIENT_ID", ""),
-				ClientSecret: getEnv("BAIDU_CLIENT_SECRET", ""),
-				RefreshToken: getEnv("BAIDU_REFRESH_TOKEN", ""),
-			},
-		},
+	cfg := loadEmbeddedDefaults()
+
+	yamlPath := getEnv("CONFIG_PATH", "application.yml")
+	if data, err := os.ReadFile(yamlPath); err == nil {
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			log.Printf("warning: failed to parse %s: %v", yamlPath, err)
+		}
+	}
+
+	applyEnvOverrides(cfg)
+
+	cfg.Database.Path = expandHome(cfg.Database.Path)
+	cfg.Storage.Local.BooksDir = expandHome(cfg.Storage.Local.BooksDir)
+
+	return cfg
+}
+
+func loadEmbeddedDefaults() *Config {
+	data, err := defaultConfigYAML.ReadFile("application.yml")
+	if err != nil {
+		log.Fatalf("failed to read embedded config: %v", err)
+	}
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		log.Fatalf("failed to parse embedded config: %v", err)
+	}
+	return &cfg
+}
+
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("SERVER_HOST"); v != "" {
+		cfg.Server.Host = v
+	}
+	if v := os.Getenv("SERVER_PORT"); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			cfg.Server.Port = i
+		}
+	}
+	if v := os.Getenv("DB_PATH"); v != "" {
+		cfg.Database.Path = v
+	}
+	if v := os.Getenv("STORAGE_DRIVER"); v != "" {
+		cfg.Storage.Driver = v
+	}
+	if v := os.Getenv("STORAGE_LOCAL_BOOKS_DIR"); v != "" {
+		cfg.Storage.Local.BooksDir = v
+	}
+	if v := os.Getenv("BAIDU_CLIENT_ID"); v != "" {
+		cfg.Storage.Baidu.ClientID = v
+	}
+	if v := os.Getenv("BAIDU_CLIENT_SECRET"); v != "" {
+		cfg.Storage.Baidu.ClientSecret = v
+	}
+	if v := os.Getenv("BAIDU_REFRESH_TOKEN"); v != "" {
+		cfg.Storage.Baidu.RefreshToken = v
 	}
 }
 
@@ -69,17 +110,6 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func getEnvInt(key string, fallback int) int {
-	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
-		}
-	}
-	return fallback
-}
-
-// expandHome 将路径开头的 "~" 替换为用户主目录。
-// 在 Windows 上等价于 %USERPROFILE%。
 func expandHome(path string) string {
 	if len(path) == 0 || path[0] != '~' {
 		return path
@@ -91,6 +121,5 @@ func expandHome(path string) string {
 	if len(path) == 1 {
 		return home
 	}
-	return filepath.Join(home, path[2:]) // 跳过 "~" 和分隔符
+	return filepath.Join(home, path[2:])
 }
-

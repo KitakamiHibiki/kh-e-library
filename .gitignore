@@ -1,4 +1,4 @@
-# --- Go ---
+﻿# --- Go ---
 backend/kh-e-library
 backend/kh-e-library.exe
 backend/tmp/
@@ -39,3 +39,7 @@ Thumbs.db
 # --- Build artifacts ---
 backend/web/dist/*
 !backend/web/dist/index.html
+# --- Archives ---
+*.tar.gz
+*.zip
+!kh-e-library*

@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -10,6 +10,7 @@ npm install
 npm run build
 
 echo "==> Copying frontend dist to backend..."
+rm -rf "$ROOT_DIR/backend/web/dist"
 mkdir -p "$ROOT_DIR/backend/web/dist"
 cp -r "$ROOT_DIR/client/web/dist/"* "$ROOT_DIR/backend/web/dist/"
 
@@ -17,4 +18,9 @@ echo "==> Building backend..."
 cd "$ROOT_DIR/backend"
 go build -ldflags="-s -w -X main.Version=${VERSION}" -o kh-e-library ./cmd/server
 
-echo "==> Done! Binary: backend/e-library"
+echo "==> Packaging archive..."
+cp application.yml .
+tar czf "kh-e-library-${VERSION}-$(go env GOOS)-$(go env GOARCH).tar.gz" kh-e-library application.yml
+rm -f application.yml kh-e-library
+
+echo "==> Done! Archive: backend/kh-e-library-${VERSION}-$(go env GOOS)-$(go env GOARCH).tar.gz"
