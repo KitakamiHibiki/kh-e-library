@@ -56,8 +56,9 @@ func Load() *Config {
 
 	applyEnvOverrides(cfg)
 
-	cfg.Database.Path = expandHome(cfg.Database.Path)
-	cfg.Storage.Local.BooksDir = expandHome(cfg.Storage.Local.BooksDir)
+	// resolve paths: ~/ -> home, relative -> exe dir
+	cfg.Database.Path = resolveExeRelative(expandHome(cfg.Database.Path))
+	cfg.Storage.Local.BooksDir = resolveExeRelative(expandHome(cfg.Storage.Local.BooksDir))
 
 	return cfg
 }
@@ -110,6 +111,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// expandHome replaces leading ~ with the user's home directory.
 func expandHome(path string) string {
 	if len(path) == 0 || path[0] != '~' {
 		return path
@@ -122,4 +124,17 @@ func expandHome(path string) string {
 		return home
 	}
 	return filepath.Join(home, path[2:])
+}
+
+// resolveExeRelative resolves relative paths against the binary's own directory.
+// Absolute paths and paths already expanded from ~ are returned unchanged.
+func resolveExeRelative(path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(filepath.Dir(exe), path)
 }
