@@ -91,7 +91,6 @@ jobs:
         run: |
           cd backend
           VERSION=$(cat ../${{ env.VERSION_FILE }})
-          cp application.yml .
           if [ "${{ matrix.goos }}" = "windows" ]; then
             archive="kh-e-library-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}.zip"
             zip "${archive}" "${binary}" application.yml
@@ -161,7 +160,6 @@ jobs:
         run: |
           cd backend
           VERSION=$(cat ../${{ env.VERSION_FILE }})
-          cp application.yml .
           archive="kh-e-library-${VERSION}-darwin-${{ matrix.goarch }}.tar.gz"
           tar czf "${archive}" "${binary}" application.yml
           echo "archive=${archive}" >> $GITHUB_ENV

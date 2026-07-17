@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -19,7 +19,6 @@ cd "$ROOT_DIR/backend"
 go build -ldflags="-s -w -X main.Version=${VERSION}" -o kh-e-library ./cmd/server
 
 echo "==> Packaging archive..."
-cp application.yml .
 tar czf "kh-e-library-${VERSION}-$(go env GOOS)-$(go env GOARCH).tar.gz" kh-e-library application.yml
 rm -f application.yml kh-e-library
 

@@ -20,3 +20,4 @@ go build -ldflags="-s -w -X main.Version=%VERSION%" -o kh-e-library.exe ./cmd/se
 echo === Done! Binary: backend\e-library.exe
 pause
 
+
