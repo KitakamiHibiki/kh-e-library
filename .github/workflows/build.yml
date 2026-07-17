@@ -36,18 +36,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libmupdf-dev pkg-config
-
       - name: Install cross-compilers
         if: matrix.deps
         run: sudo apt-get update && sudo apt-get install -y ${{ matrix.deps }}
-
-      - name: Install mupdf
-        run: brew install mupdf
-
-      - name: Install mupdf
-        run: brew install mupdf
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -120,12 +111,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install mupdf
-        run: brew install mupdf
-
-      - name: Install mupdf
-        run: brew install mupdf
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

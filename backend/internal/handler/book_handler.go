@@ -2,8 +2,8 @@
 
 import (
 	"bytes"
+	"io"
 	"fmt"
-	"image/jpeg"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,7 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kitakami-hibiki/e-library/internal/config"
 	"github.com/kitakami-hibiki/e-library/internal/epub"
-	"github.com/gen2brain/go-fitz"
+	pdfapi "github.com/pdfcpu/pdfcpu/pkg/api"
+	pdfmodel "github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/kitakami-hibiki/e-library/internal/model"
 	"github.com/kitakami-hibiki/e-library/internal/service"
 )
@@ -190,32 +191,39 @@ func (h *BookHandler) Cover(c *gin.Context) {
 
 
 
+
+
 func extractPDFCover(path string, bookID uint) (string, error) {
-	doc, err := fitz.New(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("open pdf: %w", err)
+		return "", fmt.Errorf("read pdf: %w", err)
 	}
-	defer doc.Close()
-
-	img, err := doc.Image(0)
-	if err != nil {
-		return "", fmt.Errorf("render page 0: %w", err)
-	}
-
-	ext := ".jpg"
+	conf := pdfmodel.NewDefaultConfiguration()
+	rs := bytes.NewReader(data)
 	coversDir := filepath.Join(filepath.Dir(config.DatabasePath()), "covers")
 	os.MkdirAll(coversDir, 0755)
-	coverPath := filepath.Join(coversDir, fmt.Sprintf("%d%s", bookID, ext))
 
-	f, err := os.Create(coverPath)
-	if err != nil {
-		return "", fmt.Errorf("create cover file: %w", err)
+	var coverPath string
+	handler := func(img pdfmodel.Image, _ bool, _ int) error {
+		if coverPath != "" {
+			return nil
+		}
+		ext := ".jpg"
+		coverPath = filepath.Join(coversDir, fmt.Sprintf("%d%s", bookID, ext))
+		f, err := os.Create(coverPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(f, img.Reader)
+		return err
 	}
-	defer f.Close()
 
-	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: 80}); err != nil {
-		return "", fmt.Errorf("encode jpeg: %w", err)
+	if err := pdfapi.ExtractImages(rs, []string{"1"}, handler, conf); err != nil {
+		return "", fmt.Errorf("extract: %w", err)
 	}
-
+	if coverPath == "" {
+		return "", fmt.Errorf("no images")
+	}
 	return coverPath, nil
 }
