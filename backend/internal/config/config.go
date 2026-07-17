@@ -1,7 +1,6 @@
 package config
 
 import (
-	"embed"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,13 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed application.yml
-var defaultConfigYAML embed.FS
-
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Storage  StorageConfig  `yaml:"storage"`
+	Server ServerConfig `yaml:"server"`
 }
 
 type ServerConfig struct {
@@ -24,28 +18,23 @@ type ServerConfig struct {
 	Port int    `yaml:"port"`
 }
 
-type DatabaseConfig struct {
-	Path string `yaml:"path"`
-}
+// Hardcoded data paths — not user-configurable.
+const (
+	DataDirRel       = "./data"
+	BooksDirRel      = "./data/books"
+	DatabaseFileRel  = "./data/library.db"
+)
 
-type StorageConfig struct {
-	Driver string            `yaml:"driver"`
-	Local  LocalStorageConfig `yaml:"local"`
-	Baidu  BaiduStorageConfig `yaml:"baidu"`
-}
-
-type LocalStorageConfig struct {
-	BooksDir string `yaml:"books_dir"`
-}
-
-type BaiduStorageConfig struct {
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
-	RefreshToken string `yaml:"refresh_token"`
-}
+func DatabasePath() string { return resolveExeRelative(DatabaseFileRel) }
+func DefaultBooksDir() string { return resolveExeRelative(BooksDirRel) }
 
 func Load() *Config {
-	cfg := loadEmbeddedDefaults()
+	cfg := &Config{
+		Server: ServerConfig{
+			Host: "0.0.0.0",
+			Port: 14325,
+		},
+	}
 
 	yamlPath := getEnv("CONFIG_PATH", "application.yml")
 	if data, err := os.ReadFile(yamlPath); err == nil {
@@ -54,28 +43,6 @@ func Load() *Config {
 		}
 	}
 
-	applyEnvOverrides(cfg)
-
-	// resolve paths: ~/ -> home, relative -> exe dir
-	cfg.Database.Path = resolveExeRelative(expandHome(cfg.Database.Path))
-	cfg.Storage.Local.BooksDir = resolveExeRelative(expandHome(cfg.Storage.Local.BooksDir))
-
-	return cfg
-}
-
-func loadEmbeddedDefaults() *Config {
-	data, err := defaultConfigYAML.ReadFile("application.yml")
-	if err != nil {
-		log.Fatalf("failed to read embedded config: %v", err)
-	}
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		log.Fatalf("failed to parse embedded config: %v", err)
-	}
-	return &cfg
-}
-
-func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("SERVER_HOST"); v != "" {
 		cfg.Server.Host = v
 	}
@@ -84,24 +51,8 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Server.Port = i
 		}
 	}
-	if v := os.Getenv("DB_PATH"); v != "" {
-		cfg.Database.Path = v
-	}
-	if v := os.Getenv("STORAGE_DRIVER"); v != "" {
-		cfg.Storage.Driver = v
-	}
-	if v := os.Getenv("STORAGE_LOCAL_BOOKS_DIR"); v != "" {
-		cfg.Storage.Local.BooksDir = v
-	}
-	if v := os.Getenv("BAIDU_CLIENT_ID"); v != "" {
-		cfg.Storage.Baidu.ClientID = v
-	}
-	if v := os.Getenv("BAIDU_CLIENT_SECRET"); v != "" {
-		cfg.Storage.Baidu.ClientSecret = v
-	}
-	if v := os.Getenv("BAIDU_REFRESH_TOKEN"); v != "" {
-		cfg.Storage.Baidu.RefreshToken = v
-	}
+
+	return cfg
 }
 
 func getEnv(key, fallback string) string {
@@ -111,23 +62,6 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// expandHome replaces leading ~ with the user's home directory.
-func expandHome(path string) string {
-	if len(path) == 0 || path[0] != '~' {
-		return path
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	if len(path) == 1 {
-		return home
-	}
-	return filepath.Join(home, path[2:])
-}
-
-// resolveExeRelative resolves relative paths against the binary's own directory.
-// Absolute paths and paths already expanded from ~ are returned unchanged.
 func resolveExeRelative(path string) string {
 	if filepath.IsAbs(path) {
 		return path

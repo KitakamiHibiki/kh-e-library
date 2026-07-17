@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import type { AxiosResponse } from 'axios'
@@ -13,7 +13,14 @@ const labels: Record<string, string> = {
   'ui.sort_field': '排序字段',
   'ui.sort_order': '排序方式',
   'reader.font_size': '阅读字号',
+  'storage.driver': '存储后端',
+  'storage.local.books_dir': '本地存储目录',
+  'storage.baidu.client_id': 'Client ID',
+  'storage.baidu.client_secret': 'Client Secret',
+  'storage.baidu.refresh_token': 'Refresh Token',
 }
+
+const isBaidu = computed(() => settings.value['storage.driver'] === 'baidu')
 
 const themeOptions = [
   { label: '浅色', value: 'light' },
@@ -33,6 +40,11 @@ const sortOrderOptions = [
   { label: '升序', value: 'asc' },
 ]
 
+const storageOptions = [
+  { label: '本地文件系统', value: 'local' },
+  { label: '百度网盘', value: 'baidu' },
+]
+
 const fetchSettings = async () => {
   loading.value = true
   try {
@@ -48,7 +60,7 @@ const fetchSettings = async () => {
 const save = async () => {
   try {
     await api.put('/settings', { settings: settings.value })
-    ElMessage.success('设置已保存')
+    ElMessage.success('设置已保存，存储后端立即生效')
   } catch (e) {
     ElMessage.error('保存失败')
   }
@@ -61,26 +73,21 @@ onMounted(fetchSettings)
   <el-container>
     <el-header>
       <el-row align="middle" style="height: 100%">
-        <el-col>
-          <h1 style="margin: 0">设置</h1>
-        </el-col>
+        <el-col><h1 style="margin: 0">设置</h1></el-col>
         <el-col :span="4" style="text-align: right">
           <el-button @click="$router.push('/')">返回书架</el-button>
         </el-col>
       </el-row>
     </el-header>
     <el-main>
-      <el-form label-width="120px" v-loading="loading">
+      <el-form label-width="140px" v-loading="loading">
+
         <el-divider content-position="left">界面</el-divider>
 
         <el-form-item :label="labels['ui.theme']">
           <el-select v-model="settings['ui.theme']">
             <el-option v-for="o in themeOptions" :key="o.value" :label="o.label" :value="o.value" />
           </el-select>
-        </el-form-item>
-
-        <el-form-item :label="labels['ui.page_size']">
-          <el-input-number v-model.number="settings['ui.page_size']" :min="5" :max="100" />
         </el-form-item>
 
         <el-form-item :label="labels['ui.sort_field']">
@@ -95,11 +102,39 @@ onMounted(fetchSettings)
           </el-select>
         </el-form-item>
 
+        <el-form-item :label="labels['ui.page_size']">
+          <el-input-number v-model.number="settings['ui.page_size']" :min="5" :max="100" />
+        </el-form-item>
+
         <el-divider content-position="left">阅读器</el-divider>
 
         <el-form-item :label="labels['reader.font_size']">
           <el-slider v-model.number="settings['reader.font_size']" :min="12" :max="32" show-input />
         </el-form-item>
+
+        <el-divider content-position="left">存储后端</el-divider>
+
+        <el-form-item :label="labels['storage.driver']">
+          <el-select v-model="settings['storage.driver']">
+            <el-option v-for="o in storageOptions" :key="o.value" :label="o.label" :value="o.value" />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item :label="labels['storage.local.books_dir']" v-if="!isBaidu">
+          <el-input v-model="settings['storage.local.books_dir']" />
+        </el-form-item>
+
+        <template v-if="isBaidu">
+          <el-form-item :label="labels['storage.baidu.client_id']">
+            <el-input v-model="settings['storage.baidu.client_id']" />
+          </el-form-item>
+          <el-form-item :label="labels['storage.baidu.client_secret']">
+            <el-input v-model="settings['storage.baidu.client_secret']" show-password />
+          </el-form-item>
+          <el-form-item :label="labels['storage.baidu.refresh_token']">
+            <el-input v-model="settings['storage.baidu.refresh_token']" show-password />
+          </el-form-item>
+        </template>
 
         <el-form-item>
           <el-button type="primary" @click="save">保存</el-button>

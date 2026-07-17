@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"fmt"
@@ -99,4 +99,8 @@ func (s *BookService) OpenBook(id uint) (io.ReadCloser, error) {
 		return nil, err
 	}
 	return s.storage.Open(book.FilePath)
+}
+
+func (s *BookService) SetDriver(d storage.Driver) {
+	s.storage = d
 }

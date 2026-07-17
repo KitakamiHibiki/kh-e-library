@@ -16,6 +16,22 @@ func (r *SettingRepository) GetAll() ([]model.Setting, error) {
 	return settings, nil
 }
 
+// GetMap returns all settings merged with defaults as a flat map.
+func (r *SettingRepository) GetMap() (map[string]string, error) {
+	settings, err := r.GetAll()
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(model.DefaultSettings))
+	for k, v := range model.DefaultSettings {
+		m[k] = v
+	}
+	for _, s := range settings {
+		m[s.Key] = s.Value
+	}
+	return m, nil
+}
+
 func (r *SettingRepository) GetByKey(key string) (*model.Setting, error) {
 	var s model.Setting
 	if err := DB.Where("key = ?", key).First(&s).Error; err != nil {

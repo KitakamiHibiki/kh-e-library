@@ -1,18 +1,3 @@
-# server config
 server:
   host: "0.0.0.0"
   port: 14325
-
-# database
-database:
-  path: "./data/library.db"
-
-# storage backend
-storage:
-  driver: "local"
-  local:
-    books_dir: "./data/books"
-  baidu:
-    client_id: ""
-    client_secret: ""
-    refresh_token: ""

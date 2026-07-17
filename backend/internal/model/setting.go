@@ -2,7 +2,6 @@ package model
 
 import "time"
 
-// Setting 运行时设置，key-value 存储，修改后立即生效无需重启
 type Setting struct {
 	ID        uint      `json:"id" gorm:"primaryKey"`
 	Key       string    `json:"key" gorm:"uniqueIndex;not null;size:128"`
@@ -10,19 +9,29 @@ type Setting struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Predefined setting keys
+// Runtime setting keys
 const (
-	SettingTheme       = "ui.theme"        // light | dark | auto
-	SettingPageSize    = "ui.page_size"    // 每页书籍数
-	SettingSortField   = "ui.sort_field"   // title | author | created_at
-	SettingSortOrder   = "ui.sort_order"   // asc | desc
-	SettingFontSize    = "reader.font_size"
+	SettingTheme           = "ui.theme"
+	SettingPageSize        = "ui.page_size"
+	SettingSortField       = "ui.sort_field"
+	SettingSortOrder       = "ui.sort_order"
+	SettingFontSize        = "reader.font_size"
+	SettingStorageDriver   = "storage.driver"
+	SettingStorageBooksDir = "storage.local.books_dir"
+	SettingBaiduClientID   = "storage.baidu.client_id"
+	SettingBaiduSecret     = "storage.baidu.client_secret"
+	SettingBaiduToken      = "storage.baidu.refresh_token"
 )
 
 var DefaultSettings = map[string]string{
-	SettingTheme:     "light",
-	SettingPageSize:  "20",
-	SettingSortField: "updated_at",
-	SettingSortOrder: "desc",
-	SettingFontSize:  "16",
+	SettingTheme:           "light",
+	SettingPageSize:        "20",
+	SettingSortField:       "updated_at",
+	SettingSortOrder:       "desc",
+	SettingFontSize:        "16",
+	SettingStorageDriver:   "local",
+	SettingStorageBooksDir: "./data/books",
+	SettingBaiduClientID:   "",
+	SettingBaiduSecret:     "",
+	SettingBaiduToken:      "",
 }

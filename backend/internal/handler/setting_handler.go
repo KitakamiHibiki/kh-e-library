@@ -1,41 +1,30 @@
-package handler
+﻿package handler
 
 import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kitakami-hibiki/e-library/internal/model"
 	"github.com/kitakami-hibiki/e-library/internal/repository"
 )
 
 type SettingHandler struct {
-	repo *repository.SettingRepository
+	repo       *repository.SettingRepository
+	onSettings func(map[string]string) // called when settings are saved
 }
 
-func NewSettingHandler(repo *repository.SettingRepository) *SettingHandler {
-	return &SettingHandler{repo: repo}
+func NewSettingHandler(repo *repository.SettingRepository, onSettings func(map[string]string)) *SettingHandler {
+	return &SettingHandler{repo: repo, onSettings: onSettings}
 }
 
-// ListAll returns all settings merged with defaults
 func (h *SettingHandler) ListAll(c *gin.Context) {
-	settings, err := h.repo.GetAll()
+	m, err := h.repo.GetMap()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	m := make(map[string]string)
-	for k, v := range model.DefaultSettings {
-		m[k] = v
-	}
-	for _, s := range settings {
-		m[s.Key] = s.Value
-	}
-
 	c.JSON(http.StatusOK, gin.H{"data": m})
 }
 
-// Update batch updates settings
 func (h *SettingHandler) Update(c *gin.Context) {
 	var body struct {
 		Settings map[string]string `json:"settings"`
@@ -47,6 +36,12 @@ func (h *SettingHandler) Update(c *gin.Context) {
 	if err := h.repo.BatchUpsert(body.Settings); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// trigger hot-reload if storage config was changed
+	if h.onSettings != nil {
+		if all, err := h.repo.GetMap(); err == nil {
+			h.onSettings(all)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }

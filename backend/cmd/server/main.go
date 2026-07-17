@@ -3,7 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
+	"github.com/gin-gonic/gin"
 	"github.com/kitakami-hibiki/e-library/internal/config"
 	"github.com/kitakami-hibiki/e-library/internal/handler"
 	"github.com/kitakami-hibiki/e-library/internal/middleware"
@@ -11,7 +14,6 @@ import (
 	"github.com/kitakami-hibiki/e-library/internal/service"
 	"github.com/kitakami-hibiki/e-library/internal/storage"
 	"github.com/kitakami-hibiki/e-library/web"
-	"github.com/gin-gonic/gin"
 )
 
 var Version = "dev"
@@ -20,36 +22,24 @@ func main() {
 	cfg := config.Load()
 	log.Printf("kitakami_hibiki e-library v%s starting ...", Version)
 
-	repository.InitDB(cfg.Database.Path)
+	repository.InitDB(config.DatabasePath())
 
-	storeFactory := storage.NewFactory()
-	localDriver := storage.NewLocalDriver(cfg.Storage.Local.BooksDir)
-	storeFactory.Register("local", localDriver)
-	if cfg.Storage.Baidu.ClientID != "" {
-		baiduDriver := storage.NewBaiduDriver(
-			cfg.Storage.Baidu.ClientID,
-			cfg.Storage.Baidu.ClientSecret,
-			cfg.Storage.Baidu.RefreshToken,
-		)
-		storeFactory.Register("baidu", baiduDriver)
-	}
-	storeDriver := storeFactory.Get(cfg.Storage.Driver)
-	if storeDriver == nil {
-		log.Fatalf("unknown storage driver: %s", cfg.Storage.Driver)
-	}
+	settingRepo := repository.NewSettingRepository()
+	settings, _ := settingRepo.GetMap()
+	storeDriver := initStorageFromSettings(settings)
 
 	bookRepo := repository.NewBookRepository()
 	bookSvc := service.NewBookService(bookRepo, storeDriver)
+
 	bookHandler := handler.NewBookHandler(bookSvc)
 	readingHandler := handler.NewReadingHandler(bookSvc)
-
-	settingRepo := repository.NewSettingRepository()
-	settingHandler := handler.NewSettingHandler(settingRepo)
+	settingHandler := handler.NewSettingHandler(settingRepo, func(all map[string]string) {
+		reloadStorage(bookSvc, all)
+	})
 
 	r := gin.Default()
 	r.Use(middleware.CORS())
 	r.Use(middleware.Logger())
-
 	web.RegisterRoutes(r)
 
 	api := r.Group("/api/v1")
@@ -77,4 +67,36 @@ func main() {
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
+}
+
+func initStorageFromSettings(s map[string]string) storage.Driver {
+	driverType := s["storage.driver"]
+	if driverType == "" || driverType == "local" {
+		booksDir := s["storage.local.books_dir"]
+		if booksDir == "" {
+			booksDir = config.DefaultBooksDir()
+		}
+		return storage.NewLocalDriver(resolveExePath(booksDir))
+	}
+	return storage.NewBaiduDriver(
+		s["storage.baidu.client_id"],
+		s["storage.baidu.client_secret"],
+		s["storage.baidu.refresh_token"],
+	)
+}
+
+func reloadStorage(svc *service.BookService, s map[string]string) {
+	svc.SetDriver(initStorageFromSettings(s))
+	log.Printf("storage driver switched to %s", s["storage.driver"])
+}
+
+func resolveExePath(path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(filepath.Dir(exe), path)
 }
