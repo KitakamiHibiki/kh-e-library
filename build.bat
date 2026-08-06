@@ -15,9 +15,10 @@ xcopy /E /Y "%~dp0client\web\dist" "%~dp0backend\web\dist\"
 
 echo === Building backend ===
 cd /d "%~dp0backend"
+set CGO_ENABLED=0
 go build -ldflags="-s -w -X main.Version=%VERSION%" -o kh-e-library.exe ./cmd/server
 
-echo === Done! Binary: backend\e-library.exe
+echo === Done! Binary: backend\kh-e-library.exe
 pause
 
 

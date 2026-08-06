@@ -10,7 +10,7 @@ const router = createRouter({
       component: BookShelf,
     },
     {
-      path: '/read/:id',
+      path: '/read',
       name: 'reader',
       component: () => import('@/views/Reader.vue'),
     },

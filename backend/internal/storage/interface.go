@@ -1,66 +1,79 @@
-﻿package storage
+package storage
 
 import (
 	"io"
-	"time"
 )
 
-// FileInfo 包含存储后端中一个文件的元信息
-type FileInfo struct {
-	Path    string    // 文件在存储后端中的唯一标识
-	Name    string    // 原始文件名
-	Size    int64     // 文件大小（字节）
-	ModTime time.Time // 最后修改时间
-	ETag    string    // 可选：校验和 / 版本标识
+// ReadSeekCloser combines io.Reader, io.Seeker, and io.Closer.
+// *os.File implements this interface, allowing efficient Range request handling.
+type ReadSeekCloser interface {
+	io.Reader
+	io.Seeker
+	io.Closer
 }
 
-// Driver 定义了书籍文件存储的统一抽象层。
-// 所有存储后端（本地文件系统、百度网盘等）均需实现此接口。
+// FileInfo contains metadata about a file in a storage backend.
+type FileInfo struct {
+	Path    string // unique identifier within the storage backend
+	Name    string // original filename
+	Size    int64  // file size in bytes
+	ModTime int64  // last modified time (Unix seconds)
+	ETag    string // optional: checksum / version identifier
+}
+
+// Driver defines the unified abstraction for book file storage.
+// All methods take bookID as the first parameter; the driver internally
+// constructs the full path as {baseDir}/{bookID}/{fileName}.
 type Driver interface {
-	// Name 返回存储后端的名称标识，如 "local" / "baidu"
+	// Name returns the storage backend identifier, e.g. "local".
 	Name() string
 
-	// Save 将 reader 中的内容以 filename 为名保存到存储后端。
-	// 返回存储路径（唯一标识）及实际写入的字节数。
-	Save(filename string, reader io.Reader) (path string, size int64, err error)
+	// Save stores the content from reader as the given filename under the book's directory.
+	// Returns the saved filename and the number of bytes written.
+	Save(bookID uint, filename string, reader io.Reader) (fileName string, size int64, err error)
 
-	// Open 根据 path（Save 返回的标识）打开文件用于读取。
-	Open(path string) (io.ReadCloser, error)
+	// Open opens a file for reading by bookID and fileName.
+	// Implementations should return a ReadSeekCloser when possible to support Range requests.
+	Open(bookID uint, fileName string) (ReadSeekCloser, error)
 
-	// Delete 根据 path 删除存储后端的文件。
-	Delete(path string) error
+	// DeleteBook removes the entire directory for a book (including all files).
+	DeleteBook(bookID uint) error
 
-	// Exists 检查指定 path 的文件是否存在于后端。
-	Exists(path string) (bool, error)
+	// Delete removes a single file from the book's directory.
+	Delete(bookID uint, fileName string) error
 
-	// GetURL 返回文件的直接访问 URL。
-	// 本地后端返回文件系统路径，云端后端返回可下载的临时链接。
-	// ephemeral 为 true 时表示 URL 有有效期，调用方不应缓存。
-	GetURL(path string) (url string, ephemeral bool, err error)
+	// Exists checks whether a file exists in the book's directory.
+	Exists(bookID uint, fileName string) (bool, error)
 
-	// Stat 获取文件的详细元信息。
-	// 实现方应尽可能填充 FileInfo 的各个字段。
-	Stat(path string) (*FileInfo, error)
+	// GetURL returns a URL for direct file access.
+	// ephemeral=true means the URL has a limited lifetime and should not be cached.
+	GetURL(bookID uint, fileName string) (url string, ephemeral bool, err error)
+
+	// Stat returns file metadata.
+	Stat(bookID uint, fileName string) (*FileInfo, error)
 }
 
-// Factory 管理多个存储后端的注册与获取。
+// Factory manages multiple storage backend drivers by name.
 type Factory struct {
 	drivers map[string]Driver
 }
 
+// NewFactory creates an empty driver factory.
 func NewFactory() *Factory {
 	return &Factory{drivers: make(map[string]Driver)}
 }
 
+// Register adds a driver to the factory.
 func (f *Factory) Register(name string, d Driver) {
 	f.drivers[name] = d
 }
 
+// Get retrieves a driver by name. Returns nil if not found.
 func (f *Factory) Get(name string) Driver {
 	return f.drivers[name]
 }
 
-// Cleanup 释放所有注册的后端资源。
+// Cleanup releases resources held by all registered drivers.
 func (f *Factory) Cleanup() {
 	for _, d := range f.drivers {
 		if c, ok := d.(io.Closer); ok {

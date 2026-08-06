@@ -51,28 +51,61 @@
 
 ## 快速开始
 
-### 本地运行
+### 环境要求
+
+- Go 1.25+
+- Node.js 22+
+	
+### 方式一：开发模式（前后端分离，推荐开发时使用）
 
 ```bash
-VERSION=v0.0.2
+# 终端 1：启动后端（监听 14325 端口）
 cd backend
-go build -ldflags="-s -w -X main.Version=" -o kh-e-library ./cmd/server
-./kh-e-library
+go run ./cmd/server
 ```
 
-访问 http://localhost:14325
+```bash
+# 终端 2：启动前端开发服务器（监听 5173 端口）
+cd client/web
+npm install
+npm run dev
+```
 
-### Docker
+前端开发服务器自带热更新，API 请求自动代理到后端 `localhost:14325`。访问 http://localhost:5173
+
+### 方式二：一键构建（生产模式）
+
+**Windows：**
+```bash
+build.bat
+```
+运行 `backend\kh-e-library.exe`，访问 http://localhost:14325
+
+**Linux / macOS：**
+```bash
+chmod +x build.sh
+./build.sh
+```
+解压生成的 `kh-e-library-*.tar.gz`，运行 `./kh-e-library`
+
+构建脚本会自动完成：前端构建 → 复制到后端 → 编译二进制。
+
+### 方式三：Docker
 
 ```bash
-# 编译部署
+# 从源码编译镜像
 docker build -f docker/Dockerfile.build \
-  --build-arg E_LIBRARY_VERSION=v0.0.2 \
-  -t e-library:build .
+  --build-arg E_LIBRARY_VERSION=v0.0.3 \
+  -t e-library:latest .
 
-# 或从 Release 下载部署
+# 运行容器
+docker run -d -p 14325:14325 -v ./data:/app/data --name e-library e-library:latest
+```
+
+```bash
+# 或从 GitHub Release 下载预编译镜像
 docker build -f docker/Dockerfile.download \
-  --build-arg E_LIBRARY_VERSION=v0.0.1 \
+  --build-arg E_LIBRARY_VERSION=v0.0.3 \
   -t e-library:download .
 ```
 

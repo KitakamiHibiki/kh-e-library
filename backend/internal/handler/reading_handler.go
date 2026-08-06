@@ -1,4 +1,4 @@
-﻿package handler
+package handler
 
 import (
 	"net/http"
@@ -9,67 +9,57 @@ import (
 	"github.com/kitakami-hibiki/e-library/internal/service"
 )
 
+// ReadingHandler handles reading progress API requests.
 type ReadingHandler struct {
 	svc *service.BookService
 }
 
+// NewReadingHandler creates a new ReadingHandler.
 func NewReadingHandler(svc *service.BookService) *ReadingHandler {
 	return &ReadingHandler{svc: svc}
 }
 
+// GetProgress handles GET /books/progress?id=
 func (h *ReadingHandler) GetProgress(c *gin.Context) {
-	bookID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-
-	progress, err := h.svc.GetProgress(uint(bookID))
+	id, err := strconv.ParseUint(c.Query("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"data": nil})
+		Error(c, http.StatusBadRequest, "请求参数无效")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": progress})
+
+	progress, err := h.svc.GetProgress(uint(id))
+	if err != nil {
+		Success(c, nil)
+		return
+	}
+
+	Success(c, progress)
 }
 
+// SaveProgress handles POST /books/progress/save
 func (h *ReadingHandler) SaveProgress(c *gin.Context) {
 	var p model.ReadingProgress
 	if err := c.ShouldBindJSON(&p); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		Error(c, http.StatusBadRequest, "请求参数无效")
 		return
 	}
+
+	// Validate required fields
+	if p.BookID == 0 {
+		Error(c, http.StatusBadRequest, "请求参数无效")
+		return
+	}
+
+	// Validate progress range (0.0 ~ 1.0)
+	if p.Progress < 0 || p.Progress > 1 {
+		Error(c, http.StatusBadRequest, "校验失败：progress 仅接受 0.0~1.0")
+		return
+	}
+
 	if err := h.svc.SaveProgress(&p); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		Error(c, http.StatusInternalServerError, "服务器内部错误")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": p})
-}
 
-func (h *ReadingHandler) ListBookmarks(c *gin.Context) {
-	bookID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-
-	bookmarks, err := h.svc.ListBookmarks(uint(bookID))
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"data": []model.Bookmark{}})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": bookmarks})
-}
-
-func (h *ReadingHandler) CreateBookmark(c *gin.Context) {
-	var b model.Bookmark
-	if err := c.ShouldBindJSON(&b); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if err := h.svc.CreateBookmark(&b); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusCreated, gin.H{"data": b})
-}
-
-func (h *ReadingHandler) DeleteBookmark(c *gin.Context) {
-	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err := h.svc.DeleteBookmark(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	Success(c, p)
 }

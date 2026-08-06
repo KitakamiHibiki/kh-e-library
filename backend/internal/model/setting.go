@@ -1,37 +1,51 @@
 package model
 
-import "time"
+import (
+	"gorm.io/gorm"
+	"time"
+)
 
+// Setting stores a runtime configuration key-value pair.
 type Setting struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	Key       string    `json:"key" gorm:"uniqueIndex;not null;size:128"`
-	Value     string    `json:"value" gorm:"type:text"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uint   `json:"id" gorm:"primaryKey"`
+	Key       string `json:"key" gorm:"uniqueIndex;not null;size:128"`
+	Value     string `json:"value" gorm:"type:text"`
+	UpdatedAt int64  `json:"updated_at" gorm:"autoUpdateTime:false"`
 }
 
-// Runtime setting keys
+// BeforeUpdate sets UpdatedAt.
+func (s *Setting) BeforeUpdate(_ *gorm.DB) error {
+	s.UpdatedAt = time.Now().Unix()
+	return nil
+}
+
+// Predefined setting keys
 const (
 	SettingTheme           = "ui.theme"
 	SettingPageSize        = "ui.page_size"
 	SettingSortField       = "ui.sort_field"
 	SettingSortOrder       = "ui.sort_order"
 	SettingFontSize        = "reader.font_size"
+	SettingPdfViewMode     = "reader.pdf_view_mode"
+	SettingEpubViewMode    = "reader.epub_view_mode"
 	SettingStorageDriver   = "storage.driver"
 	SettingStorageBooksDir = "storage.local.books_dir"
-	SettingBaiduClientID   = "storage.baidu.client_id"
-	SettingBaiduSecret     = "storage.baidu.client_secret"
-	SettingBaiduToken      = "storage.baidu.refresh_token"
 )
 
+// DefaultSettings maps predefined keys to their default values.
 var DefaultSettings = map[string]string{
 	SettingTheme:           "light",
 	SettingPageSize:        "20",
 	SettingSortField:       "updated_at",
 	SettingSortOrder:       "desc",
 	SettingFontSize:        "16",
+	SettingPdfViewMode:     "single",
+	SettingEpubViewMode:    "single",
 	SettingStorageDriver:   "local",
 	SettingStorageBooksDir: "./data/books",
-	SettingBaiduClientID:   "",
-	SettingBaiduSecret:     "",
-	SettingBaiduToken:      "",
+}
+
+// NowUnix returns the current UTC time as a Unix timestamp in seconds.
+func NowUnix() int64 {
+	return time.Now().Unix()
 }

@@ -1,55 +1,77 @@
 import axios from 'axios'
+import type { ApiResponse, Book, ReadingProgress, Tag, StatsOverview } from '@/types/book'
 
 const api = axios.create({
   baseURL: '/api/v1',
 })
 
-export interface PageResult<T> {
-  data: T[]
-  total: number
-  page: number
-}
-
 /* Books */
-export const getBooks = (page = 1, pageSize = 20, keyword = '') =>
-  api.get('/books', { params: { page, page_size: pageSize, keyword } })
+export const getBooks = (page = 1, pageSize = 20, keyword = '', tag = '', bookStatus = '', sortField = '', sortOrder = '') =>
+  api.get<ApiResponse<{ list: Book[]; total: number; page: number }>>('/books/list', {
+    params: { page, page_size: pageSize, keyword, tag, book_status: bookStatus, sort_field: sortField, sort_order: sortOrder },
+  })
 
 export const getBook = (id: number) =>
-  api.get('/books/' + id)
+  api.get<ApiResponse<Book>>('/books/detail', { params: { id } })
 
 export const uploadBook = (file: File) => {
   const fd = new FormData()
   fd.append('file', file)
-  return api.post('/books', fd)
+  return api.post<ApiResponse<Book>>('/books/create', fd)
 }
 
-export const updateBook = (id: number, data: any) =>
-  api.put('/books/' + id, data)
+export const updateBook = (id: number, data: { title?: string; author?: string; publisher?: string; read_status?: string }) =>
+  api.post<ApiResponse<null>>('/books/update', data, { params: { id } })
+
+export const reprocessBook = (id: number) =>
+  api.post<ApiResponse<null>>('/books/reprocess', null, { params: { id } })
 
 export const deleteBook = (id: number) =>
-  api.delete('/books/' + id)
+  api.post<ApiResponse<null>>('/books/delete', null, { params: { id } })
 
-export const getReadUrl = (id: number) =>
-  '/api/v1/books/' + id + '/read'
+export const batchDeleteBooks = (ids: number[]) =>
+  api.post<ApiResponse<{ deleted: number }>>('/books/batch_delete', { ids })
 
-export const getCoverUrl = (id: number) =>
-  '/api/v1/books/' + id + '/cover'
+export const getReadUrl = (id: number) => `/api/v1/books/read?id=${id}`
+export const getDownloadUrl = (id: number) => `/api/v1/books/download?id=${id}`
+export const getCoverUrl = (id: number) => `/api/v1/books/cover?id=${id}`
 
 /* Progress */
-export const getProgress = (bookId: number) =>
-  api.get('/books/' + bookId + '/progress')
+export const getProgress = (id: number) =>
+  api.get<ApiResponse<ReadingProgress>>('/books/progress', { params: { id } })
 
 export const saveProgress = (data: { book_id: number; progress: number; cfi?: string; chapter_href?: string }) =>
-  api.put('/books/' + data.book_id + '/progress', data)
+  api.post<ApiResponse<ReadingProgress>>('/books/progress/save', data)
 
-/* Bookmarks */
-export const getBookmarks = (bookId: number) =>
-  api.get('/books/' + bookId + '/bookmarks')
+/* Tags */
+export const getTags = (keyword = '') =>
+  api.get<ApiResponse<Tag[]>>('/tags/list', { params: { keyword } })
 
-export const createBookmark = (data: any) =>
-  api.post('/books/' + data.book_id + '/bookmarks', data)
+export const createTag = (name: string) =>
+  api.post<ApiResponse<Tag>>('/tags/create', { name })
 
-export const deleteBookmark = (id: number) =>
-  api.delete('/bookmarks/' + id)
+export const updateTag = (id: number, name: string) =>
+  api.post<ApiResponse<null>>('/tags/update', { name }, { params: { id } })
+
+export const deleteTag = (id: number) =>
+  api.post<ApiResponse<null>>('/tags/delete', null, { params: { id } })
+
+/* Book-Tag associations */
+export const addBookTag = (bookId: number, tagId: number) =>
+  api.post<ApiResponse<null>>('/books/tags/add', { book_id: bookId, tag_id: tagId })
+
+export const removeBookTag = (bookId: number, tagId: number) =>
+  api.post<ApiResponse<null>>('/books/tags/remove', { book_id: bookId, tag_id: tagId })
+
+/* Settings */
+export const getSettings = () =>
+  api.get<ApiResponse<Record<string, string>>>('/settings/list')
+
+export const updateSettings = (settings: Record<string, string>) =>
+  api.post<ApiResponse<null>>('/settings/update', { settings })
+
+/* Stats */
+export const getStatsOverview = () =>
+  api.get<ApiResponse<StatsOverview>>('/stats/overview')
 
 export default api

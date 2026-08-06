@@ -62,10 +62,20 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// resolveExeRelative resolves a relative path based on the working directory.
+// When running via "go run", os.Executable() points to a temp build cache,
+// so we use the current working directory instead.
 func resolveExeRelative(path string) string {
 	if filepath.IsAbs(path) {
 		return path
 	}
+	// Prefer working directory (works for "go run" and normal usage)
+	// No existence check — the data directory may not exist yet on first run,
+	// and will be created automatically by the application.
+	if wd, err := os.Getwd(); err == nil {
+		return filepath.Join(wd, path)
+	}
+	// Fallback to executable directory (for standalone binary deployment)
 	exe, err := os.Executable()
 	if err != nil {
 		return path

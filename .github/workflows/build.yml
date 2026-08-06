@@ -18,27 +18,15 @@ jobs:
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
-            cc: gcc
-            cgo: 1
           - os: ubuntu-latest
             goos: linux
             goarch: arm64
-            cc: aarch64-linux-gnu-gcc
-            cgo: 1
-            deps: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
           - os: ubuntu-latest
             goos: windows
             goarch: amd64
-            cc: x86_64-w64-mingw32-gcc
-            cgo: 1
-            deps: gcc-mingw-w64-x86-64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install cross-compilers
-        if: matrix.deps
-        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.deps }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -73,8 +61,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CC: ${{ matrix.cc }}
-          CGO_ENABLED: ${{ matrix.cgo }}
+          CGO_ENABLED: 0
         run: |
           cd backend
           VERSION=$(cat ../${{ env.VERSION_FILE }})
@@ -145,7 +132,7 @@ jobs:
         env:
           GOOS: darwin
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 1
+          CGO_ENABLED: 0
         run: |
           cd backend
           VERSION=$(cat ../${{ env.VERSION_FILE }})

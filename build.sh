@@ -16,7 +16,7 @@ cp -r "$ROOT_DIR/client/web/dist/"* "$ROOT_DIR/backend/web/dist/"
 
 echo "==> Building backend..."
 cd "$ROOT_DIR/backend"
-go build -ldflags="-s -w -X main.Version=${VERSION}" -o kh-e-library ./cmd/server
+CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${VERSION}" -o kh-e-library ./cmd/server
 
 echo "==> Packaging archive..."
 tar czf "kh-e-library-${VERSION}-$(go env GOOS)-$(go env GOARCH).tar.gz" kh-e-library application.yml

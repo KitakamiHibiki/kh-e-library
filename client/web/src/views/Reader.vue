@@ -1,233 +1,273 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick } from "vue"
-import { useRoute, useRouter } from "vue-router"
-import { ElMessage } from "element-plus"
-import { getBook, getReadUrl, getProgress, saveProgress, getBookmarks, createBookmark, deleteBookmark } from "@/api"
+import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { getBook, getProgress, getSettings, updateBook } from '@/api'
+import { useI18n } from 'vue-i18n'
+import PdfReader from '@/components/PdfReader.vue'
+import EpubReader from '@/components/EpubReader.vue'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const bookId = Number(route.params.id)
 
+const getBookIdFromRoute = (): number => {
+  const id = route.query.id
+  return id ? Number(id) : 0
+}
+
+const bookId = ref(getBookIdFromRoute())
 const loading = ref(true)
+const loadError = ref(false)
 const isPdf = ref(false)
 const progressVal = ref(0)
-const bookmarks = ref<any[]>([])
-const showBookmarks = ref(false)
-const bookTitle = ref("")
+const bookTitle = ref('')
+const bookStatus = ref('')
+const fontSize = ref(16)
+let restoredCfi: string | null = null
 
-const currentPage = ref(1)
-const totalPages = ref(0)
-const pdfCanvas = ref<HTMLCanvasElement | null>(null)
+// Refs to child components (for method calls only)
+const pdfReaderRef = ref<InstanceType<typeof PdfReader> | null>(null)
+const epubReaderRef = ref<InstanceType<typeof EpubReader> | null>(null)
 
-const zoomLevel = ref(100)
-let rendition: any = null
-let book: any = null
-let pdfDoc: any = null
-let saveTimer: any = null
+// Synced state from child components (reactive in parent)
+const pdfState = ref({
+  currentPage: 1,
+  totalPages: 0,
+  zoomLevel: 100,
+  pdfViewMode: 'single',
+  doublePageDisplay: '1',
+})
+const epubHasToc = ref(false)
+const epubState = ref({ epubViewMode: 'single' })
 
 const initReader = async () => {
+  if (!bookId.value || isNaN(bookId.value)) {
+    loading.value = false
+    ElMessage.error(t('reader.loadFailed'))
+    return
+  }
   try {
-    const bookRes = await getBook(bookId)
-    bookTitle.value = bookRes.data.data.title || ""
-    isPdf.value = (bookRes.data.data.file_path || "").toLowerCase().endsWith(".pdf")
+    const bookRes = await getBook(bookId.value)
+    const bookData = bookRes.data.data
+    bookTitle.value = bookData.title || ''
+    bookStatus.value = bookData.book_status || ''
+    isPdf.value = bookData.file_type === 'pdf'
 
-    const progRes = await getProgress(bookId)
-    const restoredCfi = progRes.data.data?.cfi || null
+    if (bookStatus.value !== 'ready') {
+      loading.value = false
+      return
+    }
+
+    // Mark as reading if currently unread
+    if (bookData.read_status === 'unread') {
+      updateBook(bookId.value, { read_status: 'reading' }).catch(() => {})
+    }
+
+    // Load reader settings
+    try {
+      const settingsRes = await getSettings()
+      const data = settingsRes.data.data
+      const fs = data?.['reader.font_size']
+      if (fs) fontSize.value = parseInt(fs)
+    } catch { /* ignore */ }
+
+    const progRes = await getProgress(bookId.value)
+    restoredCfi = progRes.data.data?.cfi || null
     if (progRes.data.data) progressVal.value = progRes.data.data.progress || 0
 
-    const bmRes = await getBookmarks(bookId)
-    bookmarks.value = bmRes.data.data || []
-
-    if (isPdf.value) {
-      await initPDF(restoredCfi)
-    } else {
-      await initEPUB(restoredCfi)
-    }
-  } finally {
     loading.value = false
+  } catch {
+    loading.value = false
+    loadError.value = true
+    ElMessage.error(t('reader.loadFailed'))
   }
 }
 
-// ===== PDF =====
-const initPDF = async (restoredPage: string | null) => {
-  await nextTick()
-  const pdfjsLib = await import("pdfjs-dist")
-  const ver = (pdfjsLib as any).version
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/" + ver + "/pdf.worker.min.mjs"
-
-  const doc = await (pdfjsLib as any).getDocument(getReadUrl(bookId)).promise
-  pdfDoc = doc
-  totalPages.value = doc.numPages
-
-  const startPage = restoredPage ? Math.min(parseInt(restoredPage), doc.numPages) : 1
-  currentPage.value = Math.max(startPage, 1)
-  await renderPage(currentPage.value)
-}
-
-const renderPage = async (pageNum: number) => {
-  if (!pdfDoc) return
-  const page = await pdfDoc.getPage(pageNum)
-  const canvas = pdfCanvas.value
-  if (!canvas) return
-  const ctx = canvas.getContext("2d")
-  if (!ctx) return
-
-  const vp = page.getViewport({ scale: 1 })
-  const availHeight = window.innerHeight - 130
-  const fitScale = availHeight / vp.height
-  const scale = fitScale * zoomLevel.value / 100
-  const svp = page.getViewport({ scale })
-
-  canvas.width = svp.width
-  canvas.height = svp.height
-  await page.render({ canvasContext: ctx, viewport: svp }).promise
-
-  const prog = pageNum / totalPages.value
-  progressVal.value = prog
-  scheduleSave(String(pageNum), prog)
-}
-
-const prevPage = () => {
-  if (!pdfDoc || currentPage.value <= 1) return
-  currentPage.value--
-  renderPage(currentPage.value)
-}
-
-const nextPage = () => {
-  if (!pdfDoc || currentPage.value >= totalPages.value) return
-  currentPage.value++
-  renderPage(currentPage.value)
-}
-
-const zoomIn = () => { zoomLevel.value = Math.min(300, zoomLevel.value + 10); renderPage(currentPage.value) }
-const zoomOut = () => { zoomLevel.value = Math.max(25, zoomLevel.value - 10); renderPage(currentPage.value) }
-const resetZoom = () => { zoomLevel.value = 100; renderPage(currentPage.value) }
-
-const goToPage = () => {
-  if (!pdfDoc) return
-  let p = currentPage.value
-  if (p < 1) p = 1
-  if (p > totalPages.value) p = totalPages.value
-  currentPage.value = p
-  renderPage(p)
-}
-
-// ===== EPUB =====
-const initEPUB = async (restoredCfi: string | null) => {
-  await nextTick()
-  const ePub = (await import("epubjs")).default
-  book = ePub(getReadUrl(bookId))
-  rendition = book.renderTo("reader-area", {
-    width: "100%",
-    height: window.innerHeight - 50,
-    spread: "none",
-  })
-  await rendition.display(restoredCfi || undefined)
-  rendition.on("relocated", (loc: any) => {
-    if (loc && loc.percentage != null) {
-      progressVal.value = loc.percentage
-      scheduleSave(loc.start.cfi, loc.percentage, loc.start.href)
-    }
-  })
-}
-
-// ===== Shared =====
-const scheduleSave = (cfi: string, progress: number, href?: string) => {
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(async () => {
-    try {
-      await saveProgress({ book_id: bookId, progress, cfi, chapter_href: href })
-    } catch { /* ignore */ }
-  }, 2000)
-}
-
-const addBookmark = async () => {
-  try {
-    if (isPdf.value) {
-      const p = currentPage.value
-      await createBookmark({ book_id: bookId, cfi: String(p), chapter_name: "Page " + p, progress: p / totalPages.value })
-    } else if (rendition) {
-      const loc = rendition.currentLocation()
-      if (!loc) return
-      await createBookmark({ book_id: bookId, cfi: loc.start.cfi, chapter_href: loc.start.href, progress: loc.percentage })
-    }
-    ElMessage.success("bookmark added")
-    const res = await getBookmarks(bookId)
-    bookmarks.value = res.data.data || []
-  } catch { ElMessage.error("failed") }
-}
-
-const removeBookmark = async (id: number) => {
-  await deleteBookmark(id)
-  bookmarks.value = bookmarks.value.filter((b: any) => b.id !== id)
-}
-
-const goToBookmark = async (bm: any) => {
-  showBookmarks.value = false
-  if (isPdf.value && pdfDoc) {
-    const p = Math.max(1, Math.min(parseInt(bm.cfi) || 1, totalPages.value))
-    currentPage.value = p
-    await renderPage(p)
-  } else if (rendition) {
-    await rendition.display(bm.cfi)
+// Watch route query changes
+watch(() => route.query.id, (newId) => {
+  const newBookId = newId ? Number(newId) : 0
+  if (newBookId && newBookId !== bookId.value) {
+    loading.value = true
+    loadError.value = false
+    bookTitle.value = ''
+    bookStatus.value = ''
+    isPdf.value = false
+    progressVal.value = 0
+    restoredCfi = null
+    bookId.value = newBookId
+    initReader()
   }
+})
+
+const onProgressUpdate = (progress: number) => {
+  progressVal.value = progress
 }
 
-const handleKey = (e: KeyboardEvent) => {
-  if (!isPdf.value) return
-  if (e.key === "ArrowLeft") { prevPage(); e.preventDefault() }
-  if (e.key === "ArrowRight") { nextPage(); e.preventDefault() }
-  if (e.ctrlKey && (e.key === "=" || e.key === "+")) { zoomIn(); e.preventDefault() }
-  if (e.ctrlKey && e.key === "-") { zoomOut(); e.preventDefault() }
-  if (e.ctrlKey && e.key === "0") { resetZoom(); e.preventDefault() }
+const onPdfStateChange = (state: { currentPage: number; totalPages: number; zoomLevel: number; pdfViewMode: string; doublePageDisplay: string }) => {
+  pdfState.value = state
+}
+
+const onEpubTocLoaded = (items: any[]) => {
+  epubHasToc.value = items.length > 0
+}
+
+const onEpubStateChange = (state: { epubViewMode: string }) => {
+  epubState.value = state
 }
 
 onMounted(() => {
-  document.addEventListener("keydown", handleKey)
   initReader()
 })
 
-onBeforeUnmount(() => {
-  document.removeEventListener("keydown", handleKey)
-  if (saveTimer) clearTimeout(saveTimer)
-  if (rendition) rendition.destroy()
-})
+const goBack = async () => {
+  if (!isPdf.value) await epubReaderRef.value?.saveProgressNow()
+  router.push('/')
+}
 </script>
 
 <template>
-  <div style="height: 100vh; display: flex; flex-direction: column; overflow: hidden">
-    <div style="display: flex; align-items: center; padding: 6px 12px; border-bottom: 1px solid #e0e0e0; background: #fff; z-index: 10; gap: 8px; flex-shrink: 0">
-      <el-button size="small" @click="router.push('/')">back</el-button>
-      <span style="font-size: 0.9rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ bookTitle }}</span>
-      <span v-if="isPdf" style="font-size: 0.8rem; color: #666">Page {{ currentPage }}/{{ totalPages }} {{ Math.round(progressVal * 100) }}%</span>
-      <span v-else style="font-size: 0.8rem; color: #666">{{ Math.round(progressVal * 100) }}%</span>
-      <el-button size="small" @click="addBookmark">+ bookmark</el-button>
-      <el-button size="small" :type="showBookmarks ? 'primary' : 'default'" @click="showBookmarks = !showBookmarks">bookmarks ({{ bookmarks.length }})</el-button>
+  <div class="reader-container">
+    <!-- Single unified toolbar -->
+    <div class="reader-toolbar">
+      <el-button size="small" @click="goBack">{{ t('reader.back') }}</el-button>
+      <span class="book-title">{{ bookTitle }}</span>
+
+      <!-- PDF controls in toolbar -->
+      <template v-if="isPdf && pdfState.totalPages > 0">
+        <el-select
+          :model-value="pdfState.pdfViewMode"
+          size="small"
+          class="view-mode-select"
+          @change="(val: any) => pdfReaderRef?.onViewModeChange(val)"
+        >
+          <el-option value="single" :label="t('reader.viewModeSingle')" />
+          <el-option value="double" :label="t('reader.viewModeDouble')" />
+          <el-option value="scroll" :label="t('reader.viewModeScroll')" />
+        </el-select>
+        <el-button size="small" @click="pdfReaderRef?.zoomOut()" :disabled="pdfState.zoomLevel <= 25">{{ t('reader.zoomOut') }}</el-button>
+        <span class="zoom-label">{{ pdfState.zoomLevel }}%</span>
+        <el-button size="small" @click="pdfReaderRef?.zoomIn()" :disabled="pdfState.zoomLevel >= 300">{{ t('reader.zoomIn') }}</el-button>
+        <el-button v-if="pdfState.zoomLevel !== 100" size="small" @click="pdfReaderRef?.resetZoom()">{{ t('reader.fit') }}</el-button>
+        <span class="toolbar-divider"></span>
+        <span v-if="pdfState.pdfViewMode === 'double' && pdfState.currentPage !== 1" class="progress-text">{{ pdfState.doublePageDisplay }} / {{ pdfState.totalPages }} {{ Math.round(((pdfState.currentPage - 1) / pdfState.totalPages) * 100) }}%</span>
+        <span v-else class="progress-text">{{ t('reader.page', { current: pdfState.currentPage, total: pdfState.totalPages, percent: Math.round(((pdfState.currentPage - 1) / pdfState.totalPages) * 100) }) }}</span>
+      </template>
+
+      <!-- EPUB controls in toolbar -->
+      <template v-if="!isPdf">
+        <el-select
+          :model-value="epubState.epubViewMode"
+          size="small"
+          class="view-mode-select"
+          @change="(val: any) => epubReaderRef?.onViewModeChange(val)"
+        >
+          <el-option value="single" :label="t('reader.viewModeSingle')" />
+          <el-option value="double" :label="t('reader.viewModeDouble')" />
+        </el-select>
+        <el-button v-if="epubHasToc" size="small" @click="epubReaderRef?.toggleToc()">{{ t('reader.toc') }}</el-button>
+        <span class="progress-text">{{ t('reader.progressPercent', { percent: Math.round(progressVal * 100) }) }}</span>
+      </template>
     </div>
-    <div style="flex: 1; position: relative; overflow: auto">
-      <div v-if="loading" style="display: flex; justify-content: center; align-items: center; height: 100%"><span>loading book...</span></div>
-      <div v-if="!isPdf && !loading" id="reader-area" style="height: 100%"></div>
-      <div v-if="isPdf && !loading" style="display: flex; flex-direction: column; align-items: center; overflow: auto; flex: 1">
-        <canvas ref="pdfCanvas" style="box-shadow: 0 2px 8px rgba(0,0,0,0.15)"></canvas>
-        <div style="display: flex; align-items: center; gap: 8px; margin-top: 12px">
-          <el-button size="small" :disabled="currentPage <= 1" @click="prevPage">Prev</el-button>
-          <el-input-number v-model="currentPage" :min="1" :max="totalPages" size="small" controls-position="right" style="width: 130px" @change="goToPage" />
-          <span style="font-size: 0.85rem">/ {{ totalPages }}</span>
-          <el-button size="small" :disabled="currentPage >= totalPages" @click="nextPage">Next</el-button>
-          <span style="flex:1"></span>
-          <el-button size="small" @click="zoomOut" :disabled="zoomLevel <= 25">-</el-button>
-          <span style="font-size:0.85rem;min-width:40px;text-align:center">{{ zoomLevel }}%</span>
-          <el-button size="small" @click="zoomIn" :disabled="zoomLevel >= 300">+</el-button>
-          <el-button v-if="zoomLevel !== 100" size="small" @click="resetZoom">Fit</el-button>
-        </div>
+
+    <div class="reader-content">
+      <!-- Not ready state -->
+      <div v-if="bookStatus && bookStatus !== 'ready'" class="not-ready">
+        <el-result v-if="bookStatus === 'processing'" :title="t('reader.processing')" icon="info" />
+        <el-result v-else-if="bookStatus === 'failed'" :title="t('reader.failed')" icon="error" />
       </div>
-    </div>
-    <div v-if="showBookmarks" style="max-height: 30vh; overflow-y: auto; border-top: 1px solid #e0e0e0; background: #fafafa; padding: 8px 16px; flex-shrink: 0">
-      <div v-for="bm in bookmarks" :key="bm.id" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #eee">
-        <a style="cursor: pointer; color: #409eff; font-size: 0.85rem" @click="goToBookmark(bm)">{{ bm.chapter_name || "page " + Math.round(bm.progress * 100) + "%" }}</a>
-        <el-button size="small" type="danger" link @click="removeBookmark(bm.id)">del</el-button>
+
+      <!-- Loading -->
+      <div v-if="loading" class="loading-state">
+        <span>{{ t('reader.loading') }}</span>
       </div>
-      <div v-if="bookmarks.length === 0" style="color: #999; font-size: 0.85rem; padding: 8px 0">no bookmarks</div>
+
+      <!-- Load error -->
+      <div v-if="loadError" class="not-ready">
+        <el-result :title="t('reader.loadFailed')" icon="error" />
+      </div>
+
+      <!-- EPUB reader -->
+      <EpubReader
+        v-if="!isPdf && !loading && bookStatus === 'ready'"
+        ref="epubReaderRef"
+        :book-id="bookId"
+        :restored-cfi="restoredCfi"
+        :font-size="fontSize"
+        :initial-progress="progressVal"
+        @progress-update="onProgressUpdate"
+        @toc-loaded="onEpubTocLoaded"
+        @state-change="onEpubStateChange"
+      />
+
+      <!-- PDF reader -->
+      <PdfReader
+        v-if="isPdf && !loading && bookStatus === 'ready'"
+        ref="pdfReaderRef"
+        :book-id="bookId"
+        :restored-cfi="restoredCfi"
+        @progress-update="onProgressUpdate"
+        @state-change="onPdfStateChange"
+      />
     </div>
   </div>
 </template>
+
+<style scoped>
+.reader-container {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #303133);
+}
+.reader-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+  background: var(--bg-primary, #fff);
+  z-index: 10;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.book-title {
+  font-size: 0.9rem;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.view-mode-select {
+  width: 120px;
+}
+.zoom-label {
+  font-size: 0.85rem;
+  min-width: 40px;
+  text-align: center;
+}
+.toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-color, #e0e0e0);
+  margin: 0 4px;
+}
+.progress-text {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #666);
+}
+.reader-content {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+.loading-state, .not-ready {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+</style>
