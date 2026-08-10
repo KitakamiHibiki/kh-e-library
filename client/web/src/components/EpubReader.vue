@@ -79,9 +79,100 @@ const saveProgressNow = async () => {
  * re-attached content is laid out — which can land on the section's first page.
  * The caller retries until this reports success.
  */
+/**
+ * epubjs injects its img/svg sizing rule (adjustImages) only when a view is
+ * freshly loaded. After a KeepAlive round-trip the browser reloads the iframe's
+ * document, so the live document no longer matches epubjs's internal Contents —
+ * re-displaying the cached section skips adjustImages and the displayed images
+ * fall back to natural size and overflow their column.
+ *
+ * Re-applies the equivalent constraint using TWO complementary strategies:
+ *   1. Inline styles on every <img>/<svg>/<image> in the live document
+ *      (robust — survives document mutations, works immediately).
+ *   2. A <style> element for any images added later (belt-and-suspenders).
+ *
+ * Mirrors epubjs's adjustImages() faithfully:
+ *   - max-width:  columnWidth - horizontalPadding  (fallback "100%")
+ *   - max-height: (offsetHeight - verticalPadding) * 0.95
+ *   - Both with !important so EPUB CSS cannot override them.
+ */
+const fixLiveDocImages = () => {
+  try {
+    const iframe = epubArea.value?.querySelector('iframe')
+    const win = iframe?.contentWindow
+    const doc = win?.document
+    const content = doc?.body || doc?.documentElement
+    if (!win || !doc || !content) return
+
+    const cs = win.getComputedStyle(content, null)
+    const pt = parseFloat(cs.paddingTop) || 0
+    const pb = parseFloat(cs.paddingBottom) || 0
+    const pl = parseFloat(cs.paddingLeft) || 0
+    const pr = parseFloat(cs.paddingRight) || 0
+
+    // Determine column width from the live CSS (set by epubjs as inline style
+    // on the body; survives KeepAlive even when the manager's internal
+    // _layout.columnWidth has been reset).
+    let colW = 0
+    try {
+      const cssColW = cs.getPropertyValue('column-width')
+      if (cssColW && cssColW !== 'auto') {
+        colW = parseFloat(cssColW) || 0
+      }
+    } catch { /* ignore */ }
+    if (!colW || colW <= 0) {
+      colW = rendition?._layout?.columnWidth || 0
+    }
+
+    const maxW = colW && colW > 0 ? Math.max(50, Math.round(colW - pl - pr)) + 'px' : '100%'
+    const maxH = Math.max(100, Math.round((content.offsetHeight - pt - pb) * 0.95)) + 'px'
+
+    // Strategy 1: inline styles on every existing img/svg — these survive
+    // any epubjs document manipulation because they're set directly on the
+    // elements via setProperty(..., 'important').
+    const elements = content.querySelectorAll('img, svg, image')
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i] as HTMLElement
+      el.style.setProperty('max-width', maxW, 'important')
+      el.style.setProperty('max-height', maxH, 'important')
+      if (el.tagName === 'IMG' || el.tagName === 'IMAGE') {
+        el.style.setProperty('object-fit', 'contain')
+        el.style.setProperty('box-sizing', 'border-box')
+      }
+      el.style.setProperty('page-break-inside', 'avoid')
+      el.style.setProperty('break-inside', 'avoid')
+    }
+
+    // Strategy 2: stylesheet for images added later (e.g. epubjs lazy-render).
+    if (doc.head) {
+      const old = doc.getElementById('kh-image-constraint')
+      if (old) old.remove()
+      const style = doc.createElement('style')
+      style.id = 'kh-image-constraint'
+      style.textContent =
+        `img,image{max-width:${maxW}!important;max-height:${maxH}!important;` +
+        `object-fit:contain;page-break-inside:avoid;break-inside:avoid;box-sizing:border-box}` +
+        `svg{max-width:${maxW}!important;max-height:${maxH}!important;` +
+        `page-break-inside:avoid;break-inside:avoid}`
+      doc.head.appendChild(style)
+    }
+  } catch { /* ignore */ }
+}
+
 const restoreTo = (cfi: string | null): Promise<boolean> => {
   if (!rendition || !cfi) return Promise.resolve(false)
+  // After a KeepAlive cycle the manager may have calculated the layout with
+  // zero dimensions (hidden container), resetting columnWidth to 0. Force a
+  // recalculation with the current (correct) dimensions so both the manager's
+  // scroll-to logic and the following fixLiveDocImages() have accurate values.
+  try { rendition.manager?.updateLayout?.() } catch { /* ignore */ }
   return rendition.display(cfi)
+    .then(() => {
+      fixLiveDocImages()
+      // epubjs may re-render lazily after display(); schedule a second pass
+      // so late-arriving images are also constrained.
+      setTimeout(fixLiveDocImages, 200)
+    })
     .then(() => new Promise<boolean>((resolve) => {
       // Let the relocation settle, then verify the within-section page matches.
       setTimeout(() => {
@@ -229,6 +320,15 @@ const init = async () => {
     }
 
     emitState()
+    // After a KeepAlive reactivation, epubjs may re-render the cached section
+    // without calling adjustImages. The restoreTo loop already runs
+    // fixLiveDocImages after display(), but a lazy re-render triggered by
+    // the relocated event itself could discard those constraints. Apply them
+    // again once the content has settled.
+    if (restoring) {
+      fixLiveDocImages()
+      setTimeout(fixLiveDocImages, 200)
+    }
   })
 
   await rendition.display(props.restoredCfi || undefined)
