@@ -173,8 +173,8 @@ server:
 - [x] Phase 2：阅读进度同步
 - [x] 扩展：PDF 阅读支持、阅读完成页、软件更新、运行时设置
 - [ ] Phase 3：其他存储后端集成（百度网盘等）
-- [ ] Phase 4：移动端适配、PWA
+- [ ] Phase 4：移动端适配
 
 ## License
 
-MIT
+[Apache-2.0](LICENSE)
