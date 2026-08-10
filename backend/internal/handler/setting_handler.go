@@ -3,12 +3,16 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kitakami-hibiki/e-library/internal/model"
 	"github.com/kitakami-hibiki/e-library/internal/repository"
 )
+
+// githubRepoRegex matches an owner/repo slug, e.g. "kitakami-hibiki/e-library".
+var githubRepoRegex = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 // SettingHandler handles setting-related API requests.
 type SettingHandler struct {
@@ -113,6 +117,11 @@ func validateSettings(settings map[string]string) error {
 		case model.SettingStorageBooksDir:
 			if value == "" {
 				return fmt.Errorf("校验失败：storage.local.books_dir 不能为空")
+			}
+		case model.SettingGithubRepo:
+			// 允许为空（未配置），否则需符合 owner/repo 格式
+			if value != "" && !githubRepoRegex.MatchString(value) {
+				return fmt.Errorf("校验失败：update.github_repo 需为 owner/repo 格式，如 kitakami-hibiki/e-library")
 			}
 		default:
 			return fmt.Errorf("校验失败：未知设置项 %s", key)

@@ -7,7 +7,6 @@ backend/tmp/
 backend/*.exe
 backend/*.log
 backend/*.exe*
-backend/web/dist
 
 # --- Node / Vue ---
 client/web/node_modules/
@@ -45,10 +44,11 @@ Desktop.ini
 *.db-shm
 
 # --- Build artifacts ---
-# Frontend dist is copied here during build but should not be committed
-# Exception: placeholder index.html ensures the dist/ directory exists for go:embed
+# Frontend dist is copied here during build but should not be committed.
+# Exception: a stable .gitkeep ensures the dist/ directory exists for go:embed
+# on a fresh checkout; the real build output is never committed.
 backend/web/dist/*
-!backend/web/dist/index.html
+!backend/web/dist/.gitkeep
 
 # --- Archives ---
 *.tar.gz

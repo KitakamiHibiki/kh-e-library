@@ -2,6 +2,7 @@ package epub
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -293,4 +294,132 @@ func detectImageExt(data []byte) string {
 		return ".webp"
 	}
 	return ".jpg" // default fallback
+}
+
+// SanitizeXHTML repairs common XHTML malformations in an EPUB file.
+// It fixes valueless attributes (e.g. <img alt> → <img alt="">) that cause
+// strict XML parsers to reject the document. Returns the repaired EPUB bytes.
+func SanitizeXHTML(data []byte) ([]byte, error) {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("open zip: %w", err)
+	}
+
+	// Identify XHTML content files from the OPF manifest
+	files := make(map[string]*zip.File, len(zr.File))
+	for _, f := range zr.File {
+		files[f.Name] = f
+	}
+
+	opfPath, err := getOpfPath(files)
+	if err != nil {
+		// No OPF found — return original data unchanged
+		return data, nil
+	}
+
+	pkg, err := readOPF(files, opfPath)
+	if err != nil {
+		return data, nil
+	}
+
+	opfDir := path.Dir(opfPath)
+	xhtmlSet := make(map[string]bool)
+	for _, item := range pkg.Manifest.Items {
+		if strings.Contains(item.MediaType, "xhtml") || strings.Contains(item.MediaType, "html") {
+			xhtmlSet[path.Join(opfDir, item.Href)] = true
+		}
+	}
+
+	// Rebuild the ZIP with sanitized XHTML files
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	modified := false
+	for _, f := range zr.File {
+		isXhtml := xhtmlSet[f.Name]
+
+		if !isXhtml {
+			// Unmodified file: copy raw to preserve exact bytes and compression
+			if err := w.Copy(f); err != nil {
+				w.Close()
+				return nil, fmt.Errorf("copy %s: %w", f.Name, err)
+			}
+			continue
+		}
+
+		// XHTML file: read, sanitize, write
+		rc, err := f.Open()
+		if err != nil {
+			w.Close()
+			return nil, fmt.Errorf("open %s: %w", f.Name, err)
+		}
+		content, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			w.Close()
+			return nil, fmt.Errorf("read %s: %w", f.Name, err)
+		}
+
+		fixed := fixValuelessAttrs(string(content))
+		if fixed != string(content) {
+			modified = true
+		}
+
+		out, err := w.Create(f.Name)
+		if err != nil {
+			w.Close()
+			return nil, fmt.Errorf("create %s: %w", f.Name, err)
+		}
+		if _, err := out.Write([]byte(fixed)); err != nil {
+			w.Close()
+			return nil, fmt.Errorf("write %s: %w", f.Name, err)
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return nil, fmt.Errorf("close zip writer: %w", err)
+	}
+
+	if !modified {
+		return data, nil
+	}
+	return buf.Bytes(), nil
+}
+
+// fixValuelessAttrs repairs valueless HTML/XHTML attributes (e.g. <img alt> → <img alt="">).
+// This fixes the "Specification mandates value for attribute X" XML parsing error.
+// Uses a simple line-by-line approach for efficiency on large XHTML files.
+func fixValuelessAttrs(content string) string {
+	// Common valueless attribute names in EPUB XHTML
+	valuelessAttrs := []string{
+		"alt", "title", "id", "class", "style", "name", "type",
+		"href", "src", "rel", "media", "property", "datatype",
+		"content", "about", "rev", "role", "aria-expanded",
+		"aria-hidden", "aria-label", "aria-labelledby", "aria-controls",
+		"data-type", "xmlns", "xml:lang", "xml:base",
+	}
+
+	// Build a simple replacement: for each attribute name, replace patterns
+	// like " alt>" or " alt " or " alt/" with ' alt=""'
+	var result = content
+	for _, attr := range valuelessAttrs {
+		// Pattern: the attr name is preceded by whitespace and followed by
+		// a character that is NOT '=' (meaning it has no value)
+		// We handle: attr>  attr/  attr<space>  attr<tab>  attr<newline>
+
+		// Replace: " attr>" → " attr="">"
+		result = strings.ReplaceAll(result, " "+attr+">", ` `+attr+`="">`)
+		// Replace: " attr/" → " alt="" /"  (self-closing tags like <img alt/>)
+		result = strings.ReplaceAll(result, " "+attr+"/", ` `+attr+`="" /`)
+		// Replace: " attr " → ' alt="" ' (followed by another attribute)
+		result = strings.ReplaceAll(result, " "+attr+" ", ` `+attr+`="" `)
+		// Replace: " attr\t" → ' alt="" \t'
+		result = strings.ReplaceAll(result, " "+attr+"\t", ` `+attr+`=""\t`)
+		// Replace: " attr\n" → ' alt="" \n'
+		result = strings.ReplaceAll(result, " "+attr+"\n", ` `+attr+`=""\n`)
+		// Replace: " attr\r" → ' alt="" \r'
+		result = strings.ReplaceAll(result, " "+attr+"\r", ` `+attr+`=""\r`)
+	}
+
+	return result
 }

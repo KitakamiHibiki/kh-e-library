@@ -30,6 +30,7 @@ const (
 	SettingEpubViewMode    = "reader.epub_view_mode"
 	SettingStorageDriver   = "storage.driver"
 	SettingStorageBooksDir = "storage.local.books_dir"
+	SettingGithubRepo      = "update.github_repo"
 )
 
 // DefaultSettings maps predefined keys to their default values.

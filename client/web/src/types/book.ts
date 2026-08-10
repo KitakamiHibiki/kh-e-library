@@ -53,3 +53,26 @@ export interface ApiResponse<T> {
   data: T
   msg: string
 }
+
+export interface UpdateCheckResult {
+  current_version: string
+  latest_version: string
+  has_update: boolean
+  release_notes: string
+  download_url: string
+  file_name: string
+  file_size: number
+  published_at: string
+}
+
+export interface SystemStatus {
+  version: string
+  platform: string
+  executable: string
+}
+
+export interface DownloadUpdateResult {
+  status: string
+  file_path: string
+  file_size: number
+}

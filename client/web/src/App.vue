@@ -7,10 +7,19 @@ loadTheme()
 </script>
 
 <template>
-  <RouterView />
+  <!-- The Reader is kept alive so navigating to the completion page doesn't
+       unmount it: returning to /read restores the parsed book + exact scroll
+       position instantly instead of re-processing the file. Cached per full
+       path (book id), evicted LRU by :max. -->
+  <RouterView v-slot="{ Component }">
+    <KeepAlive include="Reader" :max="3">
+      <component :is="Component" :key="$route.fullPath" />
+    </KeepAlive>
+  </RouterView>
 </template>
 
-<style>
+<style lang="less">
+@import './styles/variables.less';
 :root {
   --bg-primary: #ffffff;
   --bg-secondary: #f5f5f5;

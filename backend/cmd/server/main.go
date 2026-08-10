@@ -27,6 +27,14 @@ import (
 var Version = "dev"
 var draining atomic.Bool
 
+// 版本号统一由项目环境变量 E_LIBRARY_VERSION 提供（构建脚本通过 ldflags 注入，
+// 此处支持运行时用环境变量覆盖，例如未走 ldflags 的 `go run`）。
+func init() {
+	if v := os.Getenv("E_LIBRARY_VERSION"); v != "" {
+		Version = v
+	}
+}
+
 func main() {
 	cfg := config.Load()
 
@@ -53,6 +61,7 @@ func main() {
 
 	// 4. Initialize service
 	bookSvc := service.NewBookService(bookRepo, tagRepo, settingRepo, factory)
+	updateSvc := service.NewUpdateService(settingRepo)
 
 	// 5. Initialize handlers
 	bookHandler := handler.NewBookHandler(bookSvc)
@@ -64,6 +73,15 @@ func main() {
 	})
 	healthHandler := handler.NewHealthHandler(db)
 	statsHandler := handler.NewStatsHandler(bookSvc)
+
+	// Shutdown trigger for API-driven graceful shutdown (e.g. software update).
+	shutdownCh := make(chan struct{}, 1)
+	updateHandler := handler.NewUpdateHandler(updateSvc, Version, func() {
+		select {
+		case shutdownCh <- struct{}{}:
+		default:
+		}
+	})
 
 	// 6. Setup Gin (use gin.New() to avoid duplicate logger from gin.Default())
 	r := gin.New()
@@ -127,6 +145,15 @@ func main() {
 
 		// Stats
 		api.GET("/stats/overview", statsHandler.Overview)
+
+		// System / software update
+		sys := api.Group("/system")
+		{
+			sys.GET("/status", updateHandler.Status)
+			sys.GET("/check-update", updateHandler.Check)
+			sys.POST("/download-update", updateHandler.Download)
+			sys.POST("/install-update", updateHandler.Install)
+		}
 	}
 
 	// 10. Start server with graceful shutdown
@@ -140,10 +167,14 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal
+	// Wait for interrupt signal or API-triggered shutdown (software update)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	select {
+	case <-quit:
+	case <-shutdownCh:
+		log.Println("shutdown triggered via API (software update)...")
+	}
 	log.Println("shutting down server...")
 
 	// Phase 1: Enter draining mode — reject new requests with 503

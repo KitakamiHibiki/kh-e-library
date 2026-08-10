@@ -151,8 +151,8 @@ func (s *BookService) Reprocess(id uint) error {
 	if err != nil {
 		return fmt.Errorf("书籍不存在")
 	}
-	if book.BookStatus != "failed" {
-		return fmt.Errorf("仅限重新处理失败的书籍")
+	if book.BookStatus != "failed" && book.BookStatus != "ready" {
+		return fmt.Errorf("仅限重新处理失败或已就绪的书籍")
 	}
 
 	// Delete existing cover file if present
@@ -420,6 +420,29 @@ func (s *BookService) processEPUB(ctx context.Context, book *model.Book, driver 
 		log.Printf("processEPUB: failed to parse book %d: %v", book.ID, err)
 		s.setFailed(book.ID)
 		return nil
+	}
+
+	// Sanitize XHTML content (fix valueless attributes like <img alt> → <img alt="">)
+	log.Printf("processEPUB: starting XHTML sanitization for book %d", book.ID)
+	sanitized, sanitizeErr := epub.SanitizeXHTML(data)
+	if sanitizeErr != nil {
+		log.Printf("processEPUB: warning: XHTML sanitization failed for book %d: %v", book.ID, sanitizeErr)
+		// Non-fatal: continue with original data
+	} else if len(sanitized) != len(data) {
+		// Save the repaired EPUB back to storage
+		ext := filepath.Ext(book.BookFile)
+		savedName, _, saveErr := driver.Save(book.ID, "book"+ext, bytes.NewReader(sanitized))
+		if saveErr != nil {
+			log.Printf("processEPUB: warning: failed to save sanitized EPUB for book %d: %v", book.ID, saveErr)
+		} else {
+			log.Printf("processEPUB: saved sanitized EPUB for book %d (%d → %d bytes)", book.ID, len(data), len(sanitized))
+			// Update file size if changed
+			if savedName != "" {
+				s.bookRepo.UpdateFields(book.ID, map[string]interface{}{
+					"file_size": int64(len(sanitized)),
+				})
+			}
+		}
 	}
 
 	fields := map[string]interface{}{}

@@ -1,0 +1,66 @@
+// ============================================================
+// kh e-library — Global Design Variables
+// ============================================================
+// @w: horizontal base unit (1px), used for widths, paddings, margins, gaps
+// @h: vertical base unit (1px), used for heights, line-heights, margins
+//
+// Usage: calc(N * @w) or calc(N * @h) to express dimensions
+// in relative units that scale from a single source of truth.
+// ============================================================
+
+@w: 1px;
+@h: 1px;
+
+// ---- Spacing ----
+@gap-xs:  calc(4 * @w);
+@gap-sm:  calc(8 * @w);
+@gap-md:  calc(12 * @w);
+@gap-lg:  calc(16 * @w);
+@gap-xl:  calc(24 * @w);
+@gap-xxl: calc(32 * @w);
+
+// ---- Typography ----
+@font-xs:  0.65rem;
+@font-sm:  0.75rem;
+@font-md:  0.85rem;
+@font-lg:  1.3rem;
+
+// ---- Border radius ----
+@radius-sm: calc(4 * @w);
+
+// ---- Shadows ----
+@shadow-card: 0 calc(2 * @h) calc(8 * @w) rgba(0, 0, 0, 0.15);
+
+// ---- Layout ----
+@header-height: auto;
+@toolbar-padding: calc(4 * @h) calc(12 * @w);
+@control-gap: calc(6 * @w);
+
+// ---- Book Card ----
+@card-padding: calc(12 * @w);
+@cover-radius: @radius-sm;
+@cover-margin-bottom: calc(8 * @h);
+@tag-gap: calc(4 * @w);
+@actions-margin-top: calc(8 * @h);
+@more-btn-size: calc(28 * @w);
+
+// ---- Reader ----
+@reader-padding: calc(12 * @w);
+@toc-width: calc(240 * @w);
+@toc-item-padding: calc(8 * @h) calc(16 * @w);
+@toolbar-divider-h: calc(16 * @h);
+@page-input-width: calc(130 * @w);
+@view-mode-width: calc(120 * @w);
+@zoom-label-width: calc(40 * @w);
+@empty-margin-top: calc(80 * @h);
+
+// ---- Settings ----
+@settings-form-max: 35rem;
+@settings-select-w: 12.5rem;
+@settings-input-w: 18.75rem;
+@settings-number-w: 8.75rem;
+@settings-slider-w: 17.5rem;
+
+// ---- Dialog ----
+@shelf-dialog-width: calc(400 * @w);
+@shelf-list-max-h: calc(200 * @h);

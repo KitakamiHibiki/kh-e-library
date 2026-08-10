@@ -27,6 +27,7 @@ const (
 
 func DatabasePath() string { return resolveExeRelative(DatabaseFileRel) }
 func DefaultBooksDir() string { return resolveExeRelative(BooksDirRel) }
+func DataDir() string { return resolveExeRelative(DataDirRel) }
 
 func Load() *Config {
 	cfg := &Config{

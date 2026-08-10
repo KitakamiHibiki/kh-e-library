@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Book } from '@/types/book'
 import { getCoverUrl } from '@/api'
 import { useI18n } from 'vue-i18n'
+import { CaretBottom, MoreFilled } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   book: Book
@@ -12,9 +14,23 @@ const emit = defineEmits<{
   delete: [id: number]
   reprocess: [id: number]
   updateReadStatus: [id: number, status: string]
+  bookInfo: [id: number]
+  addToShelf: [id: number]
+  exportBook: [id: number]
 }>()
 
 const { t } = useI18n()
+
+const statusLabel = computed(() => {
+  switch (props.book.read_status) {
+    case 'reading':
+      return t('bookShelf.reading')
+    case 'finished':
+      return t('bookShelf.finished')
+    default:
+      return t('bookShelf.unread')
+  }
+})
 
 const coverError = (e: Event) => {
   ;(e.target as HTMLImageElement).style.display = 'none'
@@ -28,6 +44,29 @@ const readStatusOptions = [
 
 const handleStatusChange = (status: string) => {
   emit('updateReadStatus', props.book.id, status)
+}
+
+const handleDropdownCommand = (command: string) => {
+  switch (command) {
+    case 'read':
+      emit('read', props.book.id)
+      break
+    case 'bookInfo':
+      emit('bookInfo', props.book.id)
+      break
+    case 'markFinished':
+      emit('updateReadStatus', props.book.id, 'finished')
+      break
+    case 'delete':
+      emit('delete', props.book.id)
+      break
+    case 'addToShelf':
+      emit('addToShelf', props.book.id)
+      break
+    case 'export':
+      emit('exportBook', props.book.id)
+      break
+  }
 }
 </script>
 
@@ -55,16 +94,13 @@ const handleStatusChange = (status: string) => {
       <el-tag v-for="tag in book.tags.slice(0, 3)" :key="tag" size="small" class="book-tag">{{ tag }}</el-tag>
       <el-tag v-if="book.tags.length > 3" size="small" type="info">+{{ book.tags.length - 3 }}</el-tag>
     </div>
-    <div class="book-actions">
-      <el-dropdown trigger="click" @command="handleStatusChange" @click.stop>
-        <el-tag
-          :type="book.read_status === 'reading' ? 'warning' : book.read_status === 'finished' ? 'success' : 'info'"
-          size="small"
-          class="status-tag"
-        >
-          {{ book.read_status === 'reading' ? t('bookShelf.reading') : book.read_status === 'finished' ? t('bookShelf.finished') : t('bookShelf.unread') }}
-          <el-icon class="el-icon--right"><i class="el-icon-arrow-down" /></el-icon>
-        </el-tag>
+    <div class="book-actions" @click.stop>
+      <el-dropdown trigger="click" @command="handleStatusChange">
+        <span class="read-status" :class="`read-status--${book.read_status}`">
+          <span class="read-status-dot"></span>
+          <span class="read-status-text">{{ statusLabel }}</span>
+          <el-icon class="read-status-caret"><CaretBottom /></el-icon>
+        </span>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item v-for="opt in readStatusOptions" :key="opt.value" :command="opt.value" :disabled="opt.value === book.read_status">
@@ -73,7 +109,6 @@ const handleStatusChange = (status: string) => {
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-      <span class="spacer"></span>
       <el-button
         v-if="book.book_status === 'failed'"
         size="small"
@@ -81,29 +116,41 @@ const handleStatusChange = (status: string) => {
         plain
         @click.stop="emit('reprocess', book.id)"
       >{{ t('bookShelf.reprocess') }}</el-button>
-      <el-button
-        v-if="book.book_status === 'ready'"
-        size="small"
-        @click.stop="emit('read', book.id)"
-      >{{ t('bookShelf.readButton') }}</el-button>
-      <el-button size="small" type="danger" plain @click.stop="emit('delete', book.id)">{{ t('bookShelf.deleteButton') }}</el-button>
+      <span class="spacer"></span>
+      <el-dropdown trigger="click" @command="handleDropdownCommand">
+        <el-button size="small" circle class="more-btn">
+          <el-icon><MoreFilled /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="bookInfo">{{ t('bookCard.menuBookInfo') }}</el-dropdown-item>
+            <el-dropdown-item command="read">{{ t('bookCard.menuRead') }}</el-dropdown-item>
+            <el-dropdown-item command="markFinished" :disabled="book.read_status === 'finished'">{{ t('bookCard.menuMarkFinished') }}</el-dropdown-item>
+            <el-dropdown-item command="addToShelf">{{ t('bookCard.menuAddToShelf') }}</el-dropdown-item>
+            <el-dropdown-item command="export">{{ t('bookCard.menuExport') }}</el-dropdown-item>
+            <el-dropdown-item command="delete" divided>{{ t('bookCard.menuDelete') }}</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </div>
   </el-card>
 </template>
 
-<style scoped>
+<style scoped lang="less">
+@import '../styles/variables.less';
+
 .book-card {
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s;
 }
 .book-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-2 * @h);
 }
 .book-cover {
   aspect-ratio: 3/4;
   background: var(--bg-secondary, #f5f5f5);
-  border-radius: 4px;
-  margin-bottom: 8px;
+  border-radius: @cover-radius;
+  margin-bottom: @cover-margin-bottom;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -121,7 +168,7 @@ const handleStatusChange = (status: string) => {
 }
 .pdf-badge {
   color: #e74c3c;
-  font-size: 0.85rem;
+  font-size: @font-md;
   font-weight: bold;
 }
 .file-type-tag {
@@ -130,10 +177,10 @@ const handleStatusChange = (status: string) => {
   bottom: 0;
   background: #e74c3c;
   color: #fff;
-  font-size: 0.65rem;
+  font-size: @font-xs;
   font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 0 4px 0 4px;
+  padding: 1 * @h 6 * @w;
+  border-radius: 0 @radius-sm 0 @radius-sm;
   line-height: 1.4;
   letter-spacing: 0.5px;
 }
@@ -146,15 +193,15 @@ const handleStatusChange = (status: string) => {
   align-items: center;
   justify-content: center;
   color: #fff;
-  font-size: 0.8rem;
-  gap: 4px;
+  font-size: @font-md;
+  gap: @gap-xs;
 }
 .status-overlay.failed {
   background: rgba(231, 76, 60, 0.6);
 }
 .book-title {
-  margin: 0 0 4px;
-  font-size: 0.85rem;
+  margin: 0 0 @gap-xs;
+  font-size: @font-md;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -162,7 +209,7 @@ const handleStatusChange = (status: string) => {
 .book-author {
   margin: 0;
   color: var(--text-secondary, #999);
-  font-size: 0.75rem;
+  font-size: @font-sm;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -170,21 +217,75 @@ const handleStatusChange = (status: string) => {
 .book-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
+  gap: @tag-gap;
+  margin-top: @gap-xs;
 }
 .book-tag {
-  font-size: 0.65rem;
+  font-size: @font-xs;
 }
 .book-actions {
-  margin-top: 8px;
+  margin-top: @actions-margin-top;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: @gap-xs;
   flex-wrap: wrap;
 }
-.status-tag {
+.read-status {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5 * @w);
   cursor: pointer;
+  font-size: @font-sm;
+  line-height: 1;
+  padding: calc(5 * @h) calc(8 * @w);
+  border-radius: @radius-sm;
+  transition: background 0.15s;
+  user-select: none;
+
+  &.read-status--unread {
+    color: var(--text-secondary, #909399);
+    .read-status-dot { background: #909399; }
+  }
+
+  &.read-status--reading {
+    color: #409eff;
+    .read-status-dot { background: #409eff; }
+    .read-status-text { font-weight: 500; }
+  }
+
+  &.read-status--finished {
+    color: #67c23a;
+    .read-status-dot { background: #67c23a; }
+  }
+
+  &:hover {
+    background: var(--bg-secondary, #f5f5f5);
+  }
+}
+
+.read-status-dot {
+  width: calc(8 * @w);
+  height: calc(8 * @w);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.read-status-caret {
+  font-size: 0.6rem;
+  color: currentColor;
+  opacity: 0.6;
+}
+.more-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #999);
+  padding: 0;
+  width: @more-btn-size;
+  height: @more-btn-size;
+}
+.more-btn:hover {
+  color: var(--text-primary, #303133);
+  background: var(--bg-secondary, #f5f5f5);
 }
 .spacer {
   flex: 1;

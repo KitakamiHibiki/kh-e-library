@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getBook, getProgress, getSettings, updateBook } from '@/api'
 import { useI18n } from 'vue-i18n'
 import PdfReader from '@/components/PdfReader.vue'
 import EpubReader from '@/components/EpubReader.vue'
+
+// Name for <KeepAlive include="Reader"> in App.vue — keeps the reader mounted
+// when navigating to the completion page so returning doesn't re-parse the book.
+defineOptions({ name: 'Reader' })
 
 const { t } = useI18n()
 const route = useRoute()
@@ -72,9 +76,18 @@ const initReader = async () => {
       if (fs) fontSize.value = parseInt(fs)
     } catch { /* ignore */ }
 
+    // Any restart param (e.g. "read again" from the completion page) starts
+    // from the beginning instead of restoring the saved position. The value is
+    // a timestamp so each "read again" gets a fresh KeepAlive slot.
+    const restart = route.query.restart != null
     const progRes = await getProgress(bookId.value)
-    restoredCfi = progRes.data.data?.cfi || null
-    if (progRes.data.data) progressVal.value = progRes.data.data.progress || 0
+    if (restart) {
+      restoredCfi = null
+      progressVal.value = 0
+    } else {
+      restoredCfi = progRes.data.data?.cfi || null
+      if (progRes.data.data) progressVal.value = progRes.data.data.progress || 0
+    }
 
     loading.value = false
   } catch {
@@ -84,21 +97,8 @@ const initReader = async () => {
   }
 }
 
-// Watch route query changes
-watch(() => route.query.id, (newId) => {
-  const newBookId = newId ? Number(newId) : 0
-  if (newBookId && newBookId !== bookId.value) {
-    loading.value = true
-    loadError.value = false
-    bookTitle.value = ''
-    bookStatus.value = ''
-    isPdf.value = false
-    progressVal.value = 0
-    restoredCfi = null
-    bookId.value = newBookId
-    initReader()
-  }
-})
+// No route-query watch needed: with <KeepAlive :key="$route.fullPath"> every
+// book id gets its own Reader instance, so a different book is a fresh mount.
 
 const onProgressUpdate = (progress: number) => {
   progressVal.value = progress
@@ -122,7 +122,23 @@ onMounted(() => {
 
 const goBack = async () => {
   if (!isPdf.value) await epubReaderRef.value?.saveProgressNow()
-  router.push('/')
+  // Replace so the browser back button returns to the shelf instead of back
+  // into the reader (which would re-enter the book and re-trigger completion).
+  router.replace('/')
+}
+
+// Reached the end of the book (last page + next) — enter the completion page.
+const onCompleted = async () => {
+  // Persist the final reading position for both formats before leaving, so
+  // re-entering the book restores the last page.
+  if (isPdf.value) {
+    await pdfReaderRef.value?.saveProgressNow()
+  } else {
+    await epubReaderRef.value?.saveProgressNow()
+  }
+  // Replace: the finished reading session becomes the completion page, so the
+  // browser back button goes to the shelf, not back into the completed reader.
+  router.replace({ path: '/read-complete', query: { id: String(bookId.value) } })
 }
 </script>
 
@@ -198,6 +214,7 @@ const goBack = async () => {
         @progress-update="onProgressUpdate"
         @toc-loaded="onEpubTocLoaded"
         @state-change="onEpubStateChange"
+        @completed="onCompleted"
       />
 
       <!-- PDF reader -->
@@ -208,12 +225,15 @@ const goBack = async () => {
         :restored-cfi="restoredCfi"
         @progress-update="onProgressUpdate"
         @state-change="onPdfStateChange"
+        @completed="onCompleted"
       />
     </div>
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="less">
+@import '../styles/variables.less';
+
 .reader-container {
   height: 100vh;
   width: 100vw;
@@ -226,11 +246,11 @@ const goBack = async () => {
 .reader-toolbar {
   display: flex;
   align-items: center;
-  padding: 4px 12px;
+  padding: @toolbar-padding;
   border-bottom: 1px solid var(--border-color, #e0e0e0);
   background: var(--bg-primary, #fff);
   z-index: 10;
-  gap: 8px;
+  gap: @gap-sm;
   flex-shrink: 0;
 }
 .book-title {
@@ -241,21 +261,21 @@ const goBack = async () => {
   white-space: nowrap;
 }
 .view-mode-select {
-  width: 120px;
+  width: @view-mode-width;
 }
 .zoom-label {
-  font-size: 0.85rem;
-  min-width: 40px;
+  font-size: @font-md;
+  min-width: @zoom-label-width;
   text-align: center;
 }
 .toolbar-divider {
   width: 1px;
-  height: 16px;
+  height: @toolbar-divider-h;
   background: var(--border-color, #e0e0e0);
-  margin: 0 4px;
+  margin: 0 @gap-xs;
 }
 .progress-text {
-  font-size: 0.8rem;
+  font-size: @font-sm;
   color: var(--text-secondary, #666);
 }
 .reader-content {

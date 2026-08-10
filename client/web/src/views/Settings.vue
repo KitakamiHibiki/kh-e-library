@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { getSettings, updateSettings } from '@/api'
+import { checkUpdate, downloadUpdate, getSettings, getSystemStatus, installUpdate, updateSettings } from '@/api'
+import type { UpdateCheckResult } from '@/types/book'
 import { getSavedLocale, saveLocale, type SupportedLocale } from '@/locales'
 import { useTheme } from '@/composables/useTheme'
 
@@ -12,6 +13,13 @@ const { loadTheme } = useTheme()
 const settings = ref<Record<string, string>>({})
 const savedSettings = ref<Record<string, string>>({})
 const loading = ref(false)
+
+// Software update state
+const currentVersion = ref('')
+const updateResult = ref<UpdateCheckResult | null>(null)
+const checking = ref(false)
+const downloading = ref(false)
+const installing = ref(false)
 
 const themeOptions = computed(() => [
   { label: t('settings.themeOptions.light'), value: 'light' },
@@ -61,10 +69,95 @@ const fetchSettings = async () => {
     const res = await getSettings()
     settings.value = res.data.data
     savedSettings.value = { ...res.data.data }
+    settings.value['update.github_repo'] = settings.value['update.github_repo'] || ''
   } catch {
     ElMessage.error(t('settings.loadFailed'))
   } finally {
     loading.value = false
+  }
+}
+
+// ---- Software update handlers ----
+
+const errMsg = (e: unknown, fallback: string) => {
+  const msg = (e as { response?: { data?: { msg?: string } } })?.response?.data?.msg
+  return msg || fallback
+}
+
+const formatFileSize = (bytes: number) => {
+  if (!bytes) return '-'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+const formatDate = (iso: string) => {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  return d.toString() === 'Invalid Date' ? '-' : d.toLocaleDateString()
+}
+
+const fetchSystemStatus = async () => {
+  try {
+    const res = await getSystemStatus()
+    currentVersion.value = res.data.data.version
+  } catch {
+    // Non-fatal: version just stays unknown.
+  }
+}
+
+const handleCheckUpdate = async () => {
+  const repo = (settings.value['update.github_repo'] || '').trim()
+  if (!repo) {
+    ElMessage.warning(t('settings.update.notConfigured'))
+    return
+  }
+  checking.value = true
+  updateResult.value = null
+  try {
+    const res = await checkUpdate(repo)
+    updateResult.value = res.data.data
+  } catch (e: unknown) {
+    ElMessage.error(errMsg(e, t('settings.update.checkFailed')))
+  } finally {
+    checking.value = false
+  }
+}
+
+const handleDownload = async () => {
+  if (!updateResult.value?.download_url) {
+    ElMessage.warning(t('settings.update.noDownloadUrl'))
+    return
+  }
+  downloading.value = true
+  try {
+    await downloadUpdate(updateResult.value.download_url)
+    ElMessage.success(t('settings.update.downloadSuccess'))
+  } catch (e: unknown) {
+    ElMessage.error(errMsg(e, t('settings.update.downloadFailed')))
+  } finally {
+    downloading.value = false
+  }
+}
+
+const handleInstall = async () => {
+  try {
+    await ElMessageBox.confirm(t('settings.update.installConfirm'), t('settings.update.install'), {
+      confirmButtonText: t('settings.update.install'),
+      cancelButtonText: t('settings.update.cancel'),
+      type: 'warning',
+    })
+  } catch {
+    return // user cancelled
+  }
+  installing.value = true
+  try {
+    await installUpdate()
+    ElMessage.success(t('settings.update.installSuccess'))
+  } catch (e: unknown) {
+    installing.value = false
+    ElMessage.error(errMsg(e, t('settings.update.installFailed')))
   }
 }
 
@@ -85,14 +178,17 @@ const save = async () => {
   }
 }
 
-onMounted(fetchSettings)
+onMounted(() => {
+  fetchSettings()
+  fetchSystemStatus()
+})
 </script>
 
 <template>
   <el-container class="settings-container">
     <el-header class="settings-header">
       <h1 class="settings-title">{{ t('settings.title') }}</h1>
-      <el-button @click="$router.push('/')">{{ t('settings.back') }}</el-button>
+      <el-button @click="$router.replace('/')">{{ t('settings.back') }}</el-button>
     </el-header>
     <el-main>
       <el-form label-width="7.5rem" v-loading="loading" class="settings-form">
@@ -144,6 +240,56 @@ onMounted(fetchSettings)
           <el-input v-model="settings['storage.local.books_dir']" class="settings-input" />
         </el-form-item>
 
+        <el-divider content-position="left">{{ t('settings.update.title') }}</el-divider>
+
+        <el-form-item :label="t('settings.update.currentVersion')">
+          <span class="update-version">{{ currentVersion || t('settings.update.unknown') }}</span>
+        </el-form-item>
+
+        <el-form-item :label="t('settings.update.githubRepo')">
+          <el-input
+            v-model="settings['update.github_repo']"
+            :placeholder="t('settings.update.githubRepoHint')"
+            class="settings-input"
+            clearable
+          />
+        </el-form-item>
+
+        <el-form-item>
+          <el-button type="primary" plain :loading="checking" @click="handleCheckUpdate">
+            {{ checking ? t('settings.update.checking') : t('settings.update.checkUpdate') }}
+          </el-button>
+        </el-form-item>
+
+        <div v-if="updateResult" class="update-result">
+          <template v-if="updateResult.has_update">
+            <el-alert type="success" :closable="false" show-icon>
+              <template #title>{{ t('settings.update.newVersionFound') }} {{ updateResult.latest_version }}</template>
+              <div v-if="updateResult.file_size || updateResult.published_at" class="update-meta">
+                <span v-if="updateResult.file_size">{{ t('settings.update.fileSize') }}: {{ formatFileSize(updateResult.file_size) }}</span>
+                <span v-if="updateResult.published_at">{{ t('settings.update.publishedAt') }}: {{ formatDate(updateResult.published_at) }}</span>
+              </div>
+            </el-alert>
+            <div v-if="updateResult.release_notes" class="update-notes">
+              <div class="update-notes-title">{{ t('settings.update.releaseNotes') }}</div>
+              <pre>{{ updateResult.release_notes }}</pre>
+            </div>
+            <div class="update-actions">
+              <el-button type="primary" :loading="downloading" @click="handleDownload">
+                {{ downloading ? t('settings.update.downloading') : t('settings.update.download') }}
+              </el-button>
+              <el-button type="danger" :loading="installing" :disabled="!updateResult.download_url" @click="handleInstall">
+                {{ installing ? t('settings.update.installing') : t('settings.update.install') }}
+              </el-button>
+            </div>
+          </template>
+          <template v-else>
+            <el-alert type="info" :closable="false" show-icon :title="t('settings.update.upToDate')" />
+          </template>
+        </div>
+
+        <p class="update-manual-hint">{{ t('settings.update.manualHint') }}</p>
+
         <el-form-item>
           <el-button type="primary" @click="save">{{ t('settings.save') }}</el-button>
         </el-form-item>
@@ -152,7 +298,9 @@ onMounted(fetchSettings)
   </el-container>
 </template>
 
-<style scoped>
+<style scoped lang="less">
+@import '../styles/variables.less';
+
 .settings-container {
   min-height: 100vh;
   background: var(--bg-primary, #fff);
@@ -168,18 +316,64 @@ onMounted(fetchSettings)
   flex: 1;
 }
 .settings-form {
-  max-width: 35rem;
+  max-width: @settings-form-max;
 }
 .settings-select {
-  width: 12.5rem;
+  width: @settings-select-w;
 }
 .settings-input {
-  max-width: 18.75rem;
+  max-width: @settings-input-w;
 }
 .settings-input-number {
-  width: 8.75rem;
+  width: @settings-number-w;
 }
 .settings-slider {
-  max-width: 17.5rem;
+  max-width: @settings-slider-w;
+}
+.update-version {
+  font-size: @font-md;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+}
+.update-result {
+  margin-bottom: @gap-md;
+}
+.update-meta {
+  display: flex;
+  gap: @gap-lg;
+  color: var(--text-secondary, #666);
+  font-size: @font-xs;
+  margin-top: @gap-xs;
+}
+.update-notes {
+  margin-top: @gap-md;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: @radius-sm;
+  padding: @gap-sm @gap-md;
+  background: var(--bg-secondary, #f5f5f5);
+}
+.update-notes-title {
+  font-weight: 600;
+  margin-bottom: @gap-xs;
+}
+.update-notes pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: calc(160 * @h);
+  overflow-y: auto;
+  font-family: inherit;
+  font-size: @font-sm;
+  color: var(--text-primary, #303133);
+}
+.update-actions {
+  margin-top: @gap-md;
+  display: flex;
+  gap: @gap-sm;
+}
+.update-manual-hint {
+  color: var(--text-secondary, #999);
+  font-size: @font-xs;
+  margin: 0 0 @gap-lg;
 }
 </style>

@@ -15,6 +15,11 @@ const router = createRouter({
       component: () => import('@/views/Reader.vue'),
     },
     {
+      path: '/read-complete',
+      name: 'readComplete',
+      component: () => import('@/views/ReadComplete.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('@/views/Settings.vue'),
