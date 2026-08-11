@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { checkUpdate, downloadUpdate, getSettings, getSystemStatus, installUpdate, updateSettings } from '@/api'
-import type { UpdateCheckResult } from '@/types/book'
+import { checkUpdate, getSettings, getSystemStatus, getUpdateStatus, startUpdate, updateSettings } from '@/api'
+import type { UpdateCheckResult, UpdateStatus } from '@/types/book'
 import { getSavedLocale, saveLocale, type SupportedLocale } from '@/locales'
 import { useTheme } from '@/composables/useTheme'
 
@@ -18,8 +18,17 @@ const loading = ref(false)
 const currentVersion = ref('')
 const updateResult = ref<UpdateCheckResult | null>(null)
 const checking = ref(false)
-const downloading = ref(false)
-const installing = ref(false)
+// True while the async download+install task is running or before it resolves.
+const updating = ref(false)
+const updateStatus = ref<UpdateStatus | null>(null)
+let updatePollTimer: ReturnType<typeof setInterval> | null = null
+
+const stopUpdatePolling = () => {
+  if (updatePollTimer) {
+    clearInterval(updatePollTimer)
+    updatePollTimer = null
+  }
+}
 
 const themeOptions = computed(() => [
   { label: t('settings.themeOptions.light'), value: 'light' },
@@ -125,39 +134,45 @@ const handleCheckUpdate = async () => {
   }
 }
 
-const handleDownload = async () => {
+const handleStartUpdate = async () => {
   if (!updateResult.value?.download_url) {
     ElMessage.warning(t('settings.update.noDownloadUrl'))
     return
   }
-  downloading.value = true
   try {
-    await downloadUpdate(updateResult.value.download_url)
-    ElMessage.success(t('settings.update.downloadSuccess'))
-  } catch (e: unknown) {
-    ElMessage.error(errMsg(e, t('settings.update.downloadFailed')))
-  } finally {
-    downloading.value = false
-  }
-}
-
-const handleInstall = async () => {
-  try {
-    await ElMessageBox.confirm(t('settings.update.installConfirm'), t('settings.update.install'), {
-      confirmButtonText: t('settings.update.install'),
+    await ElMessageBox.confirm(t('settings.update.installConfirm'), t('settings.update.startUpdate'), {
+      confirmButtonText: t('settings.update.startUpdate'),
       cancelButtonText: t('settings.update.cancel'),
       type: 'warning',
     })
   } catch {
     return // user cancelled
   }
-  installing.value = true
+  updating.value = true
+  updateStatus.value = null
   try {
-    await installUpdate()
-    ElMessage.success(t('settings.update.installSuccess'))
+    await startUpdate(updateResult.value.download_url)
+    // Poll the async task until it completes, fails, or the server restarts.
+    updatePollTimer = setInterval(async () => {
+      try {
+        const res = await getUpdateStatus()
+        updateStatus.value = res.data.data
+        if (res.data.data.state === 'completed') {
+          stopUpdatePolling()
+          updating.value = false
+          ElMessage.success(t('settings.update.updateCompleted'))
+        } else if (res.data.data.state === 'failed') {
+          stopUpdatePolling()
+          updating.value = false
+          ElMessage.error(res.data.data.message || t('settings.update.updateFailed'))
+        }
+      } catch {
+        // Transient (server restarting / draining) — keep polling or give up.
+      }
+    }, 1000)
   } catch (e: unknown) {
-    installing.value = false
-    ElMessage.error(errMsg(e, t('settings.update.installFailed')))
+    updating.value = false
+    ElMessage.error(errMsg(e, t('settings.update.updateFailed')))
   }
 }
 
@@ -181,6 +196,10 @@ const save = async () => {
 onMounted(() => {
   fetchSettings()
   fetchSystemStatus()
+})
+
+onBeforeUnmount(() => {
+  stopUpdatePolling()
 })
 </script>
 
@@ -275,13 +294,34 @@ onMounted(() => {
               <pre>{{ updateResult.release_notes }}</pre>
             </div>
             <div class="update-actions">
-              <el-button type="primary" :loading="downloading" @click="handleDownload">
-                {{ downloading ? t('settings.update.downloading') : t('settings.update.download') }}
-              </el-button>
-              <el-button type="danger" :loading="installing" :disabled="!updateResult.download_url" @click="handleInstall">
-                {{ installing ? t('settings.update.installing') : t('settings.update.install') }}
+              <el-button type="primary" :loading="updating" :disabled="!updateResult.download_url" @click="handleStartUpdate">
+                {{ updating ? t('settings.update.updating') : t('settings.update.startUpdate') }}
               </el-button>
             </div>
+            <div
+              v-if="updateStatus && (updateStatus.state === 'downloading' || updateStatus.state === 'installing')"
+              class="update-progress"
+            >
+              <el-progress
+                :percentage="updateStatus.progress"
+                :status="updateStatus.progress === 100 ? 'success' : ''"
+              />
+              <div class="update-progress-text">
+                {{
+                  updateStatus.state === 'downloading'
+                    ? t('settings.update.downloadingStage')
+                    : t('settings.update.installingStage')
+                }}
+              </div>
+            </div>
+            <el-alert
+              v-if="updateStatus && updateStatus.state === 'failed'"
+              class="update-error"
+              type="error"
+              :closable="false"
+              show-icon
+              :title="updateStatus.message || t('settings.update.updateFailed')"
+            />
           </template>
           <template v-else>
             <el-alert type="info" :closable="false" show-icon :title="t('settings.update.upToDate')" />
@@ -370,6 +410,17 @@ onMounted(() => {
   margin-top: @gap-md;
   display: flex;
   gap: @gap-sm;
+}
+.update-progress {
+  margin-top: @gap-md;
+}
+.update-progress-text {
+  margin-top: @gap-xs;
+  font-size: @font-xs;
+  color: var(--text-secondary, #999);
+}
+.update-error {
+  margin-top: @gap-md;
 }
 .update-manual-hint {
   color: var(--text-secondary, #999);

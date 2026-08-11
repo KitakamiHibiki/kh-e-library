@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kitakami-hibiki/e-library/internal/config"
@@ -26,6 +27,14 @@ import (
 type UpdateService struct {
 	settingRepo *repository.SettingRepository
 	httpClient  *http.Client
+
+	// task holds the status of the async download+install task. It is guarded
+	// by taskMu; accessor methods snapshot the value so callers never hold the
+	// lock while the task is running.
+	taskMu sync.RWMutex
+	task   *model.UpdateTask
+	// wg tracks the running update goroutine so graceful shutdown can wait for it.
+	wg sync.WaitGroup
 }
 
 // NewUpdateService creates a new UpdateService.
@@ -33,6 +42,7 @@ func NewUpdateService(settingRepo *repository.SettingRepository) *UpdateService 
 	return &UpdateService{
 		settingRepo: settingRepo,
 		httpClient:  &http.Client{Timeout: 15 * time.Second},
+		task:        &model.UpdateTask{State: model.UpdateIdle},
 	}
 }
 
@@ -143,8 +153,9 @@ func (s *UpdateService) pickAsset(assets []model.GitHubAsset) *model.GitHubAsset
 }
 
 // Download fetches the update package from the given URL into the update dir.
-// Returns the saved file path and its size in bytes.
-func (s *UpdateService) Download(ctx context.Context, url string) (string, int64, error) {
+// Returns the saved file path and its size in bytes. When onProgress is
+// non-nil it is invoked as bytes are copied, with the total size when known.
+func (s *UpdateService) Download(ctx context.Context, url string, onProgress func(downloaded, total int64)) (string, int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", 0, err
@@ -178,7 +189,15 @@ func (s *UpdateService) Download(ctx context.Context, url string) (string, int64
 	if err != nil {
 		return "", 0, err
 	}
-	n, copyErr := io.Copy(f, resp.Body)
+	var body io.Reader = resp.Body
+	var total int64
+	if resp.ContentLength > 0 {
+		total = resp.ContentLength
+		if onProgress != nil {
+			body = &progressReader{r: resp.Body, total: total, onProgress: onProgress}
+		}
+	}
+	n, copyErr := io.Copy(f, body)
 	closeErr := f.Close()
 	if copyErr != nil {
 		os.Remove(dest)
@@ -187,7 +206,102 @@ func (s *UpdateService) Download(ctx context.Context, url string) (string, int64
 	if closeErr != nil {
 		return "", 0, closeErr
 	}
+	if onProgress != nil {
+		onProgress(n, total)
+	}
 	return dest, n, nil
+}
+
+// progressReader wraps an io.Reader and reports cumulative progress to a
+// callback as chunks are read.
+type progressReader struct {
+	r         io.Reader
+	total     int64
+	onProgress func(downloaded, total int64)
+	read      int64
+}
+
+func (p *progressReader) Read(buf []byte) (int, error) {
+	n, err := p.r.Read(buf)
+	p.read += int64(n)
+	p.onProgress(p.read, p.total)
+	return n, err
+}
+
+// StartUpdate launches an async download+install task in the background and
+// returns immediately. Progress is tracked in the task struct and read back via
+// GetUpdateStatus. The caller must confirm with the user first.
+func (s *UpdateService) StartUpdate(downloadURL string) {
+	s.taskMu.Lock()
+	// A task is already running or the server is about to restart — ignore.
+	if s.task.State == model.UpdateDownloading || s.task.State == model.UpdateInstalling {
+		s.taskMu.Unlock()
+		return
+	}
+	s.task = &model.UpdateTask{State: model.UpdateDownloading, Message: "正在下载更新包...", Progress: 0}
+	s.taskMu.Unlock()
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+
+		s.setTaskState(model.UpdateDownloading, "正在下载更新包...", 0)
+		_, _, err := s.Download(ctx, downloadURL, func(downloaded, total int64) {
+			if total > 0 {
+				pct := int(downloaded * 100 / total)
+				if pct > 100 {
+					pct = 100
+				}
+				s.setTaskState(model.UpdateDownloading, "正在下载更新包...", pct)
+			}
+		})
+		if err != nil {
+			s.setTaskState(model.UpdateFailed, err.Error(), 0)
+			return
+		}
+
+		s.setTaskState(model.UpdateInstalling, "正在安装更新...", 100)
+		if _, err := s.Install(); err != nil {
+			s.setTaskState(model.UpdateFailed, err.Error(), 0)
+			return
+		}
+
+		// The updater has been launched; the server will restart shortly.
+		s.setTaskState(model.UpdateCompleted, "更新完成，程序即将重启", 100)
+	}()
+}
+
+// setTaskState atomically writes a new task state/message/progress snapshot.
+func (s *UpdateService) setTaskState(state model.UpdateTaskState, message string, progress int) {
+	s.taskMu.Lock()
+	s.task = &model.UpdateTask{State: state, Message: message, Progress: progress}
+	s.taskMu.Unlock()
+}
+
+// GetUpdateStatus returns a snapshot of the current update task state.
+func (s *UpdateService) GetUpdateStatus() model.UpdateTask {
+	s.taskMu.RLock()
+	defer s.taskMu.RUnlock()
+	if s.task == nil {
+		return model.UpdateTask{State: model.UpdateIdle}
+	}
+	return *s.task
+}
+
+// Shutdown waits for the update task goroutine to finish or the context to
+// expire, so a graceful shutdown doesn't cut a download short.
+func (s *UpdateService) Shutdown(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // Install prepares and launches the updater: it resolves the downloaded package

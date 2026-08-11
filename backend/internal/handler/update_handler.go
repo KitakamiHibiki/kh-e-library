@@ -61,9 +61,10 @@ func (h *UpdateHandler) Check(c *gin.Context) {
 	Success(c, result)
 }
 
-// Download handles POST /system/download-update with body {"download_url": "..."}.
-// The backend proxies the download so the whole package lands in data/update/.
-func (h *UpdateHandler) Download(c *gin.Context) {
+// StartUpdate handles POST /system/start-update with body {"download_url": "..."}.
+// It kicks off an async download+install task and returns immediately; the
+// client polls GET /system/update-status to track progress.
+func (h *UpdateHandler) StartUpdate(c *gin.Context) {
 	var body struct {
 		DownloadURL string `json:"download_url"`
 	}
@@ -72,43 +73,33 @@ func (h *UpdateHandler) Download(c *gin.Context) {
 		return
 	}
 
-	// Downloads of a large binary can take a while; use the request context.
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Minute)
-	defer cancel()
+	h.svc.StartUpdate(body.DownloadURL)
 
-	filePath, size, err := h.svc.Download(ctx, body.DownloadURL)
-	if err != nil {
-		Error(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	Success(c, gin.H{
-		"status":    "downloaded",
-		"file_path": filePath,
-		"file_size": size,
-	})
-}
-
-// Install handles POST /system/install-update.
-// It stages the downloaded package next to the running exe, launches the
-// updater script detached, responds to the client, then triggers a graceful
-// shutdown so the updater can swap the binary and restart.
-func (h *UpdateHandler) Install(c *gin.Context) {
-	newPath, err := h.svc.Install()
-	if err != nil {
-		Error(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	Success(c, gin.H{
-		"status":    "installing",
-		"new_file":  newPath,
-	})
-
-	// Let the HTTP response flush, then shut down gracefully.
+	// After the async task finishes installing, trigger the graceful shutdown
+	// so the updater script can swap the binary and restart. A failed task must
+	// NOT restart the server — the user can retry from the UI.
 	if h.shutdown != nil {
 		go func() {
-			time.Sleep(500 * time.Millisecond)
-			h.shutdown()
+			for {
+				status := h.svc.GetUpdateStatus()
+				if status.State == model.UpdateCompleted || status.State == model.UpdateFailed {
+					break
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+			if h.svc.GetUpdateStatus().State == model.UpdateCompleted {
+				// Let the client see the completed state before we drain.
+				time.Sleep(500 * time.Millisecond)
+				h.shutdown()
+			}
 		}()
 	}
+
+	Success(c, gin.H{"status": "started"})
+}
+
+// GetUpdateStatus handles GET /system/update-status — returns the current
+// async update task snapshot for polling.
+func (h *UpdateHandler) GetUpdateStatus(c *gin.Context) {
+	Success(c, h.svc.GetUpdateStatus())
 }

@@ -1,5 +1,5 @@
 import axios, { AxiosProgressEvent } from 'axios'
-import type { ApiResponse, Book, ReadingProgress, Tag, StatsOverview, UpdateCheckResult, SystemStatus, DownloadUpdateResult } from '@/types/book'
+import type { ApiResponse, Book, ReadingProgress, Tag, StatsOverview, UpdateCheckResult, SystemStatus, UpdateStatus } from '@/types/book'
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -107,10 +107,10 @@ export const getSystemStatus = () =>
 export const checkUpdate = (githubRepo: string) =>
   api.get<ApiResponse<UpdateCheckResult>>('/system/check-update', { params: { repo: githubRepo } })
 
-export const downloadUpdate = (downloadUrl: string) =>
-  api.post<ApiResponse<DownloadUpdateResult>>('/system/download-update', { download_url: downloadUrl })
+export const startUpdate = (downloadUrl: string) =>
+  api.post<ApiResponse<{ status: string }>>('/system/start-update', { download_url: downloadUrl })
 
-export const installUpdate = () =>
-  api.post<ApiResponse<{ status: string; new_file: string }>>('/system/install-update')
+export const getUpdateStatus = () =>
+  api.get<ApiResponse<UpdateStatus>>('/system/update-status')
 
 export default api

@@ -72,8 +72,10 @@ export interface SystemStatus {
   executable: string
 }
 
-export interface DownloadUpdateResult {
-  status: string
-  file_path: string
-  file_size: number
+export type UpdateTaskState = 'idle' | 'downloading' | 'installing' | 'completed' | 'failed'
+
+export interface UpdateStatus {
+  state: UpdateTaskState
+  message: string
+  progress: number
 }

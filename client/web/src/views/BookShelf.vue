@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Reading, Collection, Plus } from '@element-plus/icons-vue'
-import { getBooks, deleteBook, reprocessBook, getSettings, updateBook, getDownloadUrl, getTags, createTag, addBookTag, removeBookTag, getSystemStatus, checkUpdate, downloadUpdate, installUpdate } from '@/api'
+import { getBooks, deleteBook, reprocessBook, getSettings, updateBook, getDownloadUrl, getTags, createTag, addBookTag, removeBookTag, getSystemStatus, checkUpdate, getUpdateStatus, startUpdate } from '@/api'
 import type { Book, Tag, UpdateCheckResult } from '@/types/book'
 import { useI18n } from 'vue-i18n'
 import BookCard from '@/components/BookCard.vue'
@@ -71,9 +71,16 @@ const hasUpdate = ref(false)
 const updateInfo = ref<UpdateCheckResult | null>(null)
 const versionDialogVisible = ref(false)
 const versionChecking = ref(false)
-// "开始更新" button states: downloading the package, then installing.
-const updateDownloading = ref(false)
-const updateInstalling = ref(false)
+// True while the async download+install task is running.
+const updateRunning = ref(false)
+let updatePollTimer: ReturnType<typeof setInterval> | null = null
+
+const stopUpdatePoll = () => {
+  if (updatePollTimer) {
+    clearInterval(updatePollTimer)
+    updatePollTimer = null
+  }
+}
 
 // Upload dialog
 const uploadDialogVisible = ref(false)
@@ -219,9 +226,9 @@ const checkForUpdate = async () => {
   }
 }
 
-// "开始更新" from the version dialog: confirm, then download the package via
-// the backend proxy and install. The app auto-restarts after a successful
-// install, so the dialog disappears on its own.
+// "开始更新" from the version dialog: confirm, then start the async
+// download+install task on the backend and poll its status. The app
+// auto-restarts after a successful install, so the dialog disappears on its own.
 const handleStartUpdate = async () => {
   const info = updateInfo.value
   if (!info?.download_url) {
@@ -229,27 +236,38 @@ const handleStartUpdate = async () => {
     return
   }
   try {
-    await ElMessageBox.confirm(t('settings.update.installConfirm'), t('settings.update.install'), {
-      confirmButtonText: t('settings.update.install'),
+    await ElMessageBox.confirm(t('settings.update.installConfirm'), t('settings.update.startUpdate'), {
+      confirmButtonText: t('settings.update.startUpdate'),
       cancelButtonText: t('settings.update.cancel'),
       type: 'warning',
     })
   } catch {
     return // user cancelled
   }
-  updateDownloading.value = true
+  updateRunning.value = true
   try {
-    await downloadUpdate(info.download_url)
-    updateDownloading.value = false
-    updateInstalling.value = true
-    await installUpdate()
-    ElMessage.success(t('settings.update.installSuccess'))
+    await startUpdate(info.download_url)
+    // Poll the async task; the server restarts once it reaches "completed".
+    updatePollTimer = setInterval(async () => {
+      try {
+        const res = await getUpdateStatus()
+        if (res.data.data.state === 'completed') {
+          stopUpdatePoll()
+          updateRunning.value = false
+          ElMessage.success(t('settings.update.updateCompleted'))
+        } else if (res.data.data.state === 'failed') {
+          stopUpdatePoll()
+          updateRunning.value = false
+          ElMessage.error(res.data.data.message || t('bookShelf.updateFailed'))
+        }
+      } catch {
+        // Transient (server restarting / draining) — keep polling or give up.
+      }
+    }, 1000)
   } catch (e: unknown) {
+    updateRunning.value = false
     const msg = (e as { response?: { data?: { msg?: string } } })?.response?.data?.msg
     ElMessage.error(msg || t('bookShelf.updateFailed'))
-  } finally {
-    updateDownloading.value = false
-    updateInstalling.value = false
   }
 }
 
@@ -404,6 +422,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer)
   if (pollTimer) clearInterval(pollTimer)
+  stopUpdatePoll()
 })
 </script>
 
@@ -620,7 +639,7 @@ onBeforeUnmount(() => {
         <el-button
           v-if="updateInfo && updateInfo.has_update"
           type="primary"
-          :loading="updateDownloading || updateInstalling"
+          :loading="updateRunning"
           :disabled="!updateInfo.download_url"
           @click="handleStartUpdate"
         >

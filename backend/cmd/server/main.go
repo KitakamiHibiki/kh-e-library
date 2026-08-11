@@ -154,8 +154,8 @@ func main() {
 		{
 			sys.GET("/status", updateHandler.Status)
 			sys.GET("/check-update", updateHandler.Check)
-			sys.POST("/download-update", updateHandler.Download)
-			sys.POST("/install-update", updateHandler.Install)
+			sys.POST("/start-update", updateHandler.StartUpdate)
+			sys.GET("/update-status", updateHandler.GetUpdateStatus)
 		}
 	}
 
@@ -188,6 +188,7 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer shutdownCancel()
 	bookSvc.Shutdown(shutdownCtx)
+	updateSvc.Shutdown(shutdownCtx)
 
 	// Phase 3: Shutdown HTTP server — wait for in-flight requests (10-second timeout)
 	httpCtx, httpCancel := context.WithTimeout(context.Background(), 10*time.Second)

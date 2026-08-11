@@ -1,5 +1,28 @@
 package model
 
+// UpdateTaskState is the lifecycle state of the async update task.
+type UpdateTaskState string
+
+const (
+	// UpdateIdle means no update task is running or has run.
+	UpdateIdle UpdateTaskState = "idle"
+	// UpdateDownloading means the package is being downloaded.
+	UpdateDownloading UpdateTaskState = "downloading"
+	// UpdateInstalling means the package is being staged and the updater launched.
+	UpdateInstalling UpdateTaskState = "installing"
+	// UpdateCompleted means the updater was launched and the server will restart.
+	UpdateCompleted UpdateTaskState = "completed"
+	// UpdateFailed means the task errored out.
+	UpdateFailed UpdateTaskState = "failed"
+)
+
+// UpdateTask is the pollable status of the async download+install task.
+type UpdateTask struct {
+	State    UpdateTaskState `json:"state"`
+	Message  string          `json:"message"`
+	Progress int             `json:"progress"` // 0-100 during download
+}
+
 // UpdateCheckResult is the response payload for check-update.
 type UpdateCheckResult struct {
 	CurrentVersion string `json:"current_version"`
