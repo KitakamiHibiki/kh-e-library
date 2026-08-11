@@ -44,6 +44,9 @@ var DefaultSettings = map[string]string{
 	SettingEpubViewMode:    "single",
 	SettingStorageDriver:   "local",
 	SettingStorageBooksDir: "./data/books",
+	// 默认检查原作者发布仓库；fork / 私有部署可在设置页改为自己的仓库。
+	// 数据库中已保存的值优先于该默认值。
+	SettingGithubRepo: "KitakamiHibiki/kh-e-library",
 }
 
 // NowUnix returns the current UTC time as a Unix timestamp in seconds.

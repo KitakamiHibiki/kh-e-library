@@ -63,6 +63,7 @@ export interface UpdateCheckResult {
   file_name: string
   file_size: number
   published_at: string
+  release_url: string
 }
 
 export interface SystemStatus {

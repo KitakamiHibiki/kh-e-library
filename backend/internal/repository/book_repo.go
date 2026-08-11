@@ -8,6 +8,11 @@ import (
 	"gorm.io/gorm"
 )
 
+// NoTagFilter is the special tag value meaning "books not in any shelf".
+// The handler/API passes it through the tag param; the repo translates it to
+// a NOT EXISTS query.
+const NoTagFilter = "__none__"
+
 // BookRepository provides data access for books and reading progress.
 type BookRepository struct {
 	db *gorm.DB
@@ -37,8 +42,14 @@ func (r *BookRepository) List(page, pageSize int, keyword, tag, bookStatus, sort
 		query = query.Where("book_status = ?", bookStatus)
 	}
 
-	// Tag filter: join through book_tags + tags
-	if tag != "" {
+	// Tag filter: join through book_tags + tags.
+	// The special NoTagFilter value selects books that belong to no shelf.
+	// Only associations to still-existing tags count, so orphaned rows
+	// (a book_tag whose tag was deleted) keep the book in the "no shelf" bucket,
+	// matching what the UI shows (book.tags is populated only via tag joins).
+	if tag == NoTagFilter {
+		query = query.Where("NOT EXISTS (SELECT 1 FROM book_tags bt JOIN tags t ON bt.tag_id = t.id WHERE bt.book_id = books.id)")
+	} else if tag != "" {
 		query = query.Joins("JOIN book_tags ON book_tags.book_id = books.id").
 			Joins("JOIN tags ON book_tags.tag_id = tags.id").
 			Where("tags.name = ?", tag)

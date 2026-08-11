@@ -95,6 +95,7 @@ func (s *UpdateService) CheckGitHubRelease(ctx context.Context, githubRepo, curr
 		LatestVersion:  release.TagName,
 		ReleaseNotes:   release.Body,
 		PublishedAt:    release.PublishedAt,
+		ReleaseURL:     release.HTMLURL,
 	}
 
 	// Skip prerelease tags for the stable channel.

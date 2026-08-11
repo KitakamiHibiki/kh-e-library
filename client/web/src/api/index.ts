@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { AxiosProgressEvent } from 'axios'
 import type { ApiResponse, Book, ReadingProgress, Tag, StatsOverview, UpdateCheckResult, SystemStatus, DownloadUpdateResult } from '@/types/book'
 
 const api = axios.create({
@@ -14,10 +14,10 @@ export const getBooks = (page = 1, pageSize = 20, keyword = '', tag = '', bookSt
 export const getBook = (id: number) =>
   api.get<ApiResponse<Book>>('/books/detail', { params: { id } })
 
-export const uploadBook = (file: File) => {
+export const uploadBook = (file: File, onUploadProgress?: (e: AxiosProgressEvent) => void) => {
   const fd = new FormData()
   fd.append('file', file)
-  return api.post<ApiResponse<Book>>('/books/create', fd)
+  return api.post<ApiResponse<Book>>('/books/create', fd, { onUploadProgress })
 }
 
 export const updateBook = (id: number, data: { title?: string; author?: string; publisher?: string; read_status?: string }) =>

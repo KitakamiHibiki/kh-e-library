@@ -10,6 +10,7 @@ type UpdateCheckResult struct {
 	FileName       string `json:"file_name"`
 	FileSize       int64  `json:"file_size"`
 	PublishedAt    string `json:"published_at"`
+	ReleaseURL     string `json:"release_url"`
 }
 
 // SystemStatus is the payload for GET /system/status.

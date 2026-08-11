@@ -126,7 +126,7 @@ const handleDropdownCommand = (command: string) => {
             <el-dropdown-item command="bookInfo">{{ t('bookCard.menuBookInfo') }}</el-dropdown-item>
             <el-dropdown-item command="read">{{ t('bookCard.menuRead') }}</el-dropdown-item>
             <el-dropdown-item command="markFinished" :disabled="book.read_status === 'finished'">{{ t('bookCard.menuMarkFinished') }}</el-dropdown-item>
-            <el-dropdown-item command="addToShelf">{{ t('bookCard.menuAddToShelf') }}</el-dropdown-item>
+            <el-dropdown-item command="addToShelf">{{ book.tags?.length ? t('bookCard.menuModifyShelf') : t('bookCard.menuAddToShelf') }}</el-dropdown-item>
             <el-dropdown-item command="export">{{ t('bookCard.menuExport') }}</el-dropdown-item>
             <el-dropdown-item command="delete" divided>{{ t('bookCard.menuDelete') }}</el-dropdown-item>
           </el-dropdown-menu>
