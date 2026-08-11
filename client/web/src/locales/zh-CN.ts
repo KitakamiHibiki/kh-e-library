@@ -53,7 +53,10 @@ export default {
     selectFile: '点击选择文件',
     supportedFormats: '支持 EPUB 和 PDF 格式',
     uploading: '上传中...',
+    uploadingChunk: '正在上传分片 {current}/{total}...',
     uploadSuccess: '上传成功',
+    chunkFailed: '分片上传失败',
+    emptyFile: '文件为空',
     fileSize: '文件大小',
   },
   bookCard: {

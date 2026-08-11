@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { UploadInstance, UploadRequestOptions } from 'element-plus'
-import { uploadBook } from '@/api'
+import { initChunkUpload, uploadChunk } from '@/api'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -27,7 +27,11 @@ const errorMsg = ref('')
 const progress = ref(0)
 const selectedFileName = ref('')
 const selectedFileSize = ref(0)
+const chunkText = ref('')
 let successTimer: ReturnType<typeof setTimeout> | null = null
+
+// Each upload chunk is capped at 50MB.
+const CHUNK_SIZE = 50 * 1024 * 1024
 
 const formatFileSize = (bytes: number) => {
   if (!bytes) return '-'
@@ -41,15 +45,49 @@ const handleUpload = async (options: UploadRequestOptions) => {
   errorMsg.value = ''
   uploading.value = true
   progress.value = 0
+  chunkText.value = ''
   selectedFileName.value = options.file.name
   selectedFileSize.value = options.file.size
 
   try {
-    await uploadBook(options.file, (e) => {
-      if (e.total) {
-        progress.value = Math.round((e.loaded / e.total) * 100)
-      }
+    const file = options.file
+    if (file.size === 0) {
+      errorMsg.value = t('upload.emptyFile')
+      uploadRef.value?.clearFiles()
+      selectedFileName.value = ''
+      selectedFileSize.value = 0
+      return
+    }
+
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
+
+    // Phase 1: create the upload session
+    const initRes = await initChunkUpload({
+      file_name: file.name,
+      file_size: file.size,
+      total_chunks: totalChunks,
+      chunk_size: CHUNK_SIZE,
     })
+    const uploadId = initRes.data.data.upload_id
+
+    // Phase 2: upload chunks sequentially, aggregating progress across them
+    let uploadedBytes = 0
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE
+      const end = Math.min(start + CHUNK_SIZE, file.size)
+      const chunk = file.slice(start, end)
+
+      chunkText.value = t('upload.uploadingChunk', { current: i + 1, total: totalChunks })
+
+      await uploadChunk(uploadId, i, totalChunks, chunk, (e) => {
+        if (e.total) {
+          progress.value = Math.round(((uploadedBytes + e.loaded) / file.size) * 100)
+        }
+      })
+
+      uploadedBytes += end - start
+    }
+
     progress.value = 100
     uploadSuccess.value = true
     successTimer = setTimeout(() => {
@@ -58,10 +96,11 @@ const handleUpload = async (options: UploadRequestOptions) => {
     }, 1500)
   } catch (e: unknown) {
     const msg = (e as { response?: { data?: { msg?: string } } })?.response?.data?.msg
-    errorMsg.value = msg || t('bookShelf.uploadFailed')
+    errorMsg.value = msg || t('upload.chunkFailed')
     uploadRef.value?.clearFiles()
     selectedFileName.value = ''
     selectedFileSize.value = 0
+    chunkText.value = ''
   } finally {
     uploading.value = false
   }
@@ -78,6 +117,7 @@ const onClosed = () => {
   progress.value = 0
   selectedFileName.value = ''
   selectedFileSize.value = 0
+  chunkText.value = ''
   uploadRef.value?.clearFiles()
 }
 </script>
@@ -137,7 +177,7 @@ const onClosed = () => {
           <span class="upload-progress-size">{{ formatFileSize(selectedFileSize) }}</span>
         </div>
         <el-progress :percentage="progress" :status="progress === 100 ? 'success' : ''" />
-        <div class="upload-progress-text">{{ t('upload.uploading') }}</div>
+        <div class="upload-progress-text">{{ chunkText || t('upload.uploading') }}</div>
       </div>
     </div>
   </el-dialog>

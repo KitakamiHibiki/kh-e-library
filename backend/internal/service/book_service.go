@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -21,11 +22,12 @@ import (
 
 // BookService implements the business logic for book operations.
 type BookService struct {
-	bookRepo    *repository.BookRepository
-	tagRepo     *repository.TagRepository
-	settingRepo *repository.SettingRepository
-	factory     *storage.Factory
-	wg          sync.WaitGroup
+	bookRepo     *repository.BookRepository
+	tagRepo      *repository.TagRepository
+	settingRepo  *repository.SettingRepository
+	factory      *storage.Factory
+	chunkManager *storage.ChunkManager
+	wg           sync.WaitGroup
 }
 
 // NewBookService creates a new BookService.
@@ -34,12 +36,14 @@ func NewBookService(
 	tagRepo *repository.TagRepository,
 	settingRepo *repository.SettingRepository,
 	factory *storage.Factory,
+	chunkManager *storage.ChunkManager,
 ) *BookService {
 	return &BookService{
-		bookRepo:    bookRepo,
-		tagRepo:     tagRepo,
-		settingRepo: settingRepo,
-		factory:     factory,
+		bookRepo:     bookRepo,
+		tagRepo:      tagRepo,
+		settingRepo:  settingRepo,
+		factory:      factory,
+		chunkManager: chunkManager,
 	}
 }
 
@@ -143,6 +147,159 @@ func (s *BookService) Upload(filename string, reader io.Reader) (*model.Book, er
 	s.ProcessBookAsync(book.ID)
 
 	return book, nil
+}
+
+// maxUploadSize is the largest single file accepted (bytes).
+const maxUploadSize = 200 << 20
+
+// InitChunkUpload validates the file metadata and creates a book record in
+// the "chunking" state. The returned ID doubles as the upload session ID that
+// subsequent chunk requests must reference.
+func (s *BookService) InitChunkUpload(fileName string, fileSize int64, totalChunks, chunkSize int) (uint, error) {
+	ext := strings.ToLower(filepath.Ext(fileName))
+	if ext != ".epub" && ext != ".pdf" {
+		return 0, fmt.Errorf("不支持的文件类型: %s, 仅支持 EPUB 和 PDF", ext)
+	}
+	if fileSize <= 0 {
+		return 0, fmt.Errorf("无效的文件大小")
+	}
+	if fileSize > maxUploadSize {
+		return 0, fmt.Errorf("文件超过大小限制")
+	}
+	if totalChunks < 1 {
+		return 0, fmt.Errorf("无效的分片数量")
+	}
+	if chunkSize <= 0 {
+		return 0, fmt.Errorf("无效的分片大小")
+	}
+
+	book := &model.Book{
+		Title:      strings.TrimSuffix(fileName, filepath.Ext(fileName)),
+		FileType:   strings.TrimPrefix(ext, "."),
+		FileSize:   fileSize,
+		StorageKey: "local",
+		ReadStatus: "unread",
+		BookStatus: "chunking",
+	}
+	if err := s.bookRepo.Create(book); err != nil {
+		return 0, fmt.Errorf("创建记录失败: %w", err)
+	}
+	if err := s.chunkManager.CreateDir(book.ID); err != nil {
+		s.bookRepo.Delete(book.ID)
+		return 0, fmt.Errorf("创建分片目录失败")
+	}
+	log.Printf("InitChunkUpload: book %d (%s) ready for %d chunks of %d bytes", book.ID, fileName, totalChunks, chunkSize)
+	return book.ID, nil
+}
+
+// ReceiveChunk saves a single chunk. When the last chunk arrives
+// (chunkIndex == totalChunks-1) it assembles all chunks, validates the
+// complete file, stores it, and finalizes the book record. The second return
+// value reports whether the upload completed.
+func (s *BookService) ReceiveChunk(uploadID uint, chunkIndex, totalChunks int, reader io.Reader) (*model.Book, bool, error) {
+	book, err := s.bookRepo.GetByID(uploadID)
+	if err != nil || book.BookStatus != "chunking" {
+		return nil, false, fmt.Errorf("上传会话不存在或已过期")
+	}
+	if chunkIndex < 0 || chunkIndex >= totalChunks {
+		return nil, false, fmt.Errorf("无效的分片索引")
+	}
+
+	if err := s.chunkManager.SaveChunk(uploadID, chunkIndex, reader); err != nil {
+		s.cleanupChunkSession(uploadID)
+		return nil, false, fmt.Errorf("保存分片失败")
+	}
+
+	if chunkIndex < totalChunks-1 {
+		return nil, false, nil
+	}
+
+	// --- Last chunk: assemble, validate, finalize ---
+	ext := "." + book.FileType
+	assembledPath, fileHash, assembledSize, err := s.chunkManager.AssembleAndHash(uploadID, totalChunks, ext)
+	if err != nil {
+		s.cleanupChunkSession(uploadID)
+		return nil, false, err
+	}
+
+	// Duplicate check
+	existing, _ := s.bookRepo.GetByHash(fileHash)
+	if existing != nil {
+		os.Remove(assembledPath)
+		s.cleanupChunkSession(uploadID)
+		return nil, false, fmt.Errorf("文件已存在")
+	}
+
+	// Structure validation
+	asFile, err := os.Open(assembledPath)
+	if err != nil {
+		os.Remove(assembledPath)
+		s.cleanupChunkSession(uploadID)
+		return nil, false, fmt.Errorf("读取已组装文件失败")
+	}
+	if book.FileType == "epub" {
+		if err := epub.Validate(asFile, assembledSize); err != nil {
+			asFile.Close()
+			os.Remove(assembledPath)
+			s.cleanupChunkSession(uploadID)
+			return nil, false, fmt.Errorf("校验失败: 无效的 EPUB 文件 (%v)", err)
+		}
+	} else if book.FileType == "pdf" {
+		head := make([]byte, 5)
+		if _, err := asFile.ReadAt(head, 0); err != nil || !bytes.HasPrefix(head, []byte("%PDF-")) {
+			asFile.Close()
+			os.Remove(assembledPath)
+			s.cleanupChunkSession(uploadID)
+			return nil, false, fmt.Errorf("校验失败: 无效的 PDF 文件")
+		}
+	}
+
+	// Save to final storage location
+	if _, err := asFile.Seek(0, io.SeekStart); err != nil {
+		asFile.Close()
+		os.Remove(assembledPath)
+		s.cleanupChunkSession(uploadID)
+		return nil, false, fmt.Errorf("读取已组装文件失败")
+	}
+	driver := s.factory.Get("local")
+	savedName, size, err := driver.Save(uploadID, "book"+ext, asFile)
+	asFile.Close()
+	os.Remove(assembledPath)
+	if err != nil {
+		s.cleanupChunkSession(uploadID)
+		return nil, false, fmt.Errorf("保存文件失败")
+	}
+
+	// Finalize DB record
+	s.bookRepo.UpdateFields(uploadID, map[string]interface{}{
+		"file":        savedName,
+		"file_size":   size,
+		"file_hash":   fileHash,
+		"book_status": "processing",
+	})
+	book.BookFile = savedName
+	book.FileSize = size
+	book.FileHash = fileHash
+	book.BookStatus = "processing"
+
+	if err := s.chunkManager.Cleanup(uploadID); err != nil {
+		log.Printf("warning: failed to clean up chunks for book %d: %v", uploadID, err)
+	}
+
+	s.ProcessBookAsync(uploadID)
+	log.Printf("ReceiveChunk: book %d finalized (%d bytes)", uploadID, size)
+	return book, true, nil
+}
+
+// cleanupChunkSession removes the staging directory and the DB record for an
+// aborted chunk upload so the client can retry with a fresh session.
+func (s *BookService) cleanupChunkSession(bookID uint) {
+	if err := s.chunkManager.Cleanup(bookID); err != nil {
+		log.Printf("warning: failed to clean up chunks for book %d: %v", bookID, err)
+	}
+	if err := s.bookRepo.Delete(bookID); err != nil {
+		log.Printf("warning: failed to delete book record %d during chunk cleanup: %v", bookID, err)
+	}
 }
 
 // Reprocess re-processes a failed book.
@@ -299,6 +456,7 @@ func (s *BookService) OnSettingsChanged(changed map[string]string) error {
 			return fmt.Errorf("failed to initialize local driver: %w", err)
 		}
 		s.factory.Register("local", driver)
+		s.chunkManager.BooksDir = newDir
 		log.Printf("OnSettingsChanged: re-initialized local driver with books_dir=%s", newDir)
 	}
 	return nil

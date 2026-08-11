@@ -58,9 +58,10 @@ func main() {
 		log.Fatalf("failed to initialize local storage: %v", err)
 	}
 	factory.Register("local", localDriver)
+	chunkManager := storage.NewChunkManager(resolveExePath(booksDir))
 
 	// 4. Initialize service
-	bookSvc := service.NewBookService(bookRepo, tagRepo, settingRepo, factory)
+	bookSvc := service.NewBookService(bookRepo, tagRepo, settingRepo, factory, chunkManager)
 	updateSvc := service.NewUpdateService(settingRepo)
 
 	// 5. Initialize handlers
@@ -115,6 +116,8 @@ func main() {
 		api.GET("/books/list", bookHandler.List)
 		api.GET("/books/detail", bookHandler.GetByID)
 		api.POST("/books/create", bookHandler.Upload)
+		api.POST("/books/create/chunk/init", bookHandler.InitChunkUpload)
+		api.POST("/books/create/chunk", bookHandler.UploadChunk)
 		api.POST("/books/update", bookHandler.Update)
 		api.POST("/books/reprocess", bookHandler.Reprocess)
 		api.POST("/books/delete", bookHandler.Delete)

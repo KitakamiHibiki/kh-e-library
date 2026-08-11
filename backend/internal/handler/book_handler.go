@@ -99,6 +99,98 @@ func (h *BookHandler) Upload(c *gin.Context) {
 	SuccessWithStatus(c, http.StatusCreated, book)
 }
 
+// InitChunkUpload handles POST /books/create/chunk/init.
+// It validates file metadata and returns an upload session ID.
+func (h *BookHandler) InitChunkUpload(c *gin.Context) {
+	var req struct {
+		FileName    string `json:"file_name"`
+		FileSize    int64  `json:"file_size"`
+		TotalChunks int    `json:"total_chunks"`
+		ChunkSize   int    `json:"chunk_size"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, http.StatusBadRequest, "请求参数无效")
+		return
+	}
+
+	uploadID, err := h.svc.InitChunkUpload(req.FileName, req.FileSize, req.TotalChunks, req.ChunkSize)
+	if err != nil {
+		msg := err.Error()
+		code := http.StatusInternalServerError
+		if strings.Contains(msg, "不支持") || strings.Contains(msg, "无效") {
+			code = http.StatusBadRequest
+		} else if strings.Contains(msg, "大小限制") {
+			code = http.StatusRequestEntityTooLarge
+		}
+		Error(c, code, msg)
+		return
+	}
+
+	Success(c, gin.H{"upload_id": uploadID})
+}
+
+// UploadChunk handles POST /books/create/chunk.
+// Each request carries one 50MB-or-smaller chunk; the last chunk triggers
+// assembly and returns the finalized book.
+func (h *BookHandler) UploadChunk(c *gin.Context) {
+	uploadID, err := strconv.ParseUint(c.PostForm("upload_id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "请求参数无效: upload_id")
+		return
+	}
+	chunkIndex, err := strconv.Atoi(c.PostForm("chunk_index"))
+	if err != nil {
+		Error(c, http.StatusBadRequest, "请求参数无效: chunk_index")
+		return
+	}
+	totalChunks, err := strconv.Atoi(c.PostForm("total_chunks"))
+	if err != nil {
+		Error(c, http.StatusBadRequest, "请求参数无效: total_chunks")
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		Error(c, http.StatusBadRequest, "请求参数无效: 缺少文件数据")
+		return
+	}
+
+	// Enforce a ~55MB cap per chunk (50MB data + multipart overhead).
+	const maxChunkSize = 55 << 20
+	if file.Size > maxChunkSize {
+		Error(c, http.StatusRequestEntityTooLarge, "分片超过大小限制")
+		return
+	}
+
+	f, err := file.Open()
+	if err != nil {
+		Error(c, http.StatusInternalServerError, "服务器内部错误")
+		return
+	}
+	defer f.Close()
+
+	book, completed, err := h.svc.ReceiveChunk(uint(uploadID), chunkIndex, totalChunks, f)
+	if err != nil {
+		msg := err.Error()
+		code := http.StatusInternalServerError
+		if strings.Contains(msg, "不存在") || strings.Contains(msg, "已过期") {
+			code = http.StatusNotFound
+		} else if strings.Contains(msg, "无效") || strings.Contains(msg, "校验失败") {
+			code = http.StatusBadRequest
+		} else if strings.Contains(msg, "已存在") {
+			code = http.StatusConflict
+		}
+		Error(c, code, msg)
+		return
+	}
+
+	if completed {
+		SuccessWithStatus(c, http.StatusCreated, gin.H{"completed": true, "book": book})
+	} else {
+		Success(c, gin.H{"chunk_index": chunkIndex, "received": true})
+	}
+}
+
 // Update handles POST /books/update?id=
 func (h *BookHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Query("id"), 10, 64)

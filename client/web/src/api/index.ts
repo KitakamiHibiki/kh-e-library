@@ -20,6 +20,32 @@ export const uploadBook = (file: File, onUploadProgress?: (e: AxiosProgressEvent
   return api.post<ApiResponse<Book>>('/books/create', fd, { onUploadProgress })
 }
 
+/* Chunked upload */
+export const initChunkUpload = (data: {
+  file_name: string
+  file_size: number
+  total_chunks: number
+  chunk_size: number
+}) =>
+  api.post<ApiResponse<{ upload_id: number }>>('/books/create/chunk/init', data)
+
+export const uploadChunk = (
+  uploadId: number,
+  chunkIndex: number,
+  totalChunks: number,
+  chunk: Blob,
+  onUploadProgress?: (e: AxiosProgressEvent) => void,
+) => {
+  const fd = new FormData()
+  fd.append('upload_id', String(uploadId))
+  fd.append('chunk_index', String(chunkIndex))
+  fd.append('total_chunks', String(totalChunks))
+  fd.append('file', chunk)
+  return api.post<
+    ApiResponse<{ chunk_index: number; received: boolean } | { completed: true; book: Book }>
+  >('/books/create/chunk', fd, { onUploadProgress })
+}
+
 export const updateBook = (id: number, data: { title?: string; author?: string; publisher?: string; read_status?: string }) =>
   api.post<ApiResponse<null>>('/books/update', data, { params: { id } })
 

@@ -53,7 +53,10 @@ export default {
     selectFile: 'Click to select',
     supportedFormats: 'Supports EPUB and PDF formats',
     uploading: 'Uploading...',
+    uploadingChunk: 'Uploading chunk {current}/{total}...',
     uploadSuccess: 'Upload successful',
+    chunkFailed: 'Chunk upload failed',
+    emptyFile: 'File is empty',
     fileSize: 'File Size',
   },
   bookCard: {
