@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Book } from '@/types/book'
 import { getCoverUrl } from '@/api'
 import { useI18n } from 'vue-i18n'
 import { CaretBottom, MoreFilled } from '@element-plus/icons-vue'
+import BookCardMenu from './BookCardMenu.vue'
+import { useCardDropdownClose } from '@/composables/useCardDropdownClose'
 
 const props = defineProps<{
   book: Book
@@ -17,9 +19,35 @@ const emit = defineEmits<{
   bookInfo: [id: number]
   addToShelf: [id: number]
   exportBook: [id: number]
+  contextmenu: [payload: { id: number; x: number; y: number }]
 }>()
 
 const { t } = useI18n()
+
+// Right-click on the card opens the book action menu at the cursor position.
+// The menu itself lives in BookShelf as one shared instance, so only a single
+// context menu can ever be open.
+const openContextMenu = (e: MouseEvent) => {
+  emit('contextmenu', { id: props.book.id, x: e.clientX, y: e.clientY })
+}
+
+// Close the card's dropdowns when the user right-clicks elsewhere (left-clicks
+// already close them natively; right-clicks do not fire a "click" event).
+const statusDropdown = ref()
+const moreDropdown = ref()
+let unregisterStatus: (() => void) | null = null
+let unregisterMore: (() => void) | null = null
+
+onMounted(() => {
+  const { register } = useCardDropdownClose()
+  unregisterStatus = register(() => statusDropdown.value?.handleClose?.())
+  unregisterMore = register(() => moreDropdown.value?.handleClose?.())
+})
+
+onBeforeUnmount(() => {
+  unregisterStatus?.()
+  unregisterMore?.()
+})
 
 const statusLabel = computed(() => {
   switch (props.book.read_status) {
@@ -57,6 +85,9 @@ const handleDropdownCommand = (command: string) => {
     case 'markFinished':
       emit('updateReadStatus', props.book.id, 'finished')
       break
+    case 'markUnread':
+      emit('updateReadStatus', props.book.id, 'unread')
+      break
     case 'delete':
       emit('delete', props.book.id)
       break
@@ -71,7 +102,7 @@ const handleDropdownCommand = (command: string) => {
 </script>
 
 <template>
-  <el-card :body-style="{ padding: '12px' }" shadow="hover" class="book-card" @click="emit('read', book.id)">
+  <el-card :body-style="{ padding: '12px' }" shadow="hover" class="book-card" @click="emit('read', book.id)" @contextmenu.prevent="openContextMenu">
     <div class="book-cover">
       <img v-if="book.cover" :src="getCoverUrl(book.id)" @error="coverError" class="cover-img" />
       <span v-else-if="book.file_type === 'pdf'" class="cover-badge pdf-badge">PDF</span>
@@ -90,12 +121,8 @@ const handleDropdownCommand = (command: string) => {
     </div>
     <h4 class="book-title">{{ book.title }}</h4>
     <p class="book-author">{{ book.author || t('bookShelf.unknownAuthor') }}</p>
-    <div class="book-tags" v-if="book.tags && book.tags.length">
-      <el-tag v-for="tag in book.tags.slice(0, 3)" :key="tag" size="small" class="book-tag">{{ tag }}</el-tag>
-      <el-tag v-if="book.tags.length > 3" size="small" type="info">+{{ book.tags.length - 3 }}</el-tag>
-    </div>
     <div class="book-actions" @click.stop>
-      <el-dropdown trigger="click" @command="handleStatusChange">
+      <el-dropdown ref="statusDropdown" trigger="click" @command="handleStatusChange">
         <span class="read-status" :class="`read-status--${book.read_status}`">
           <span class="read-status-dot"></span>
           <span class="read-status-text">{{ statusLabel }}</span>
@@ -117,19 +144,12 @@ const handleDropdownCommand = (command: string) => {
         @click.stop="emit('reprocess', book.id)"
       >{{ t('bookShelf.reprocess') }}</el-button>
       <span class="spacer"></span>
-      <el-dropdown trigger="click" @command="handleDropdownCommand">
+      <el-dropdown ref="moreDropdown" trigger="click" @command="handleDropdownCommand">
         <el-button size="small" circle class="more-btn">
           <el-icon><MoreFilled /></el-icon>
         </el-button>
         <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="bookInfo">{{ t('bookCard.menuBookInfo') }}</el-dropdown-item>
-            <el-dropdown-item command="read">{{ t('bookCard.menuRead') }}</el-dropdown-item>
-            <el-dropdown-item command="markFinished" :disabled="book.read_status === 'finished'">{{ t('bookCard.menuMarkFinished') }}</el-dropdown-item>
-            <el-dropdown-item command="addToShelf">{{ book.tags?.length ? t('bookCard.menuModifyShelf') : t('bookCard.menuAddToShelf') }}</el-dropdown-item>
-            <el-dropdown-item command="export">{{ t('bookCard.menuExport') }}</el-dropdown-item>
-            <el-dropdown-item command="delete" divided>{{ t('bookCard.menuDelete') }}</el-dropdown-item>
-          </el-dropdown-menu>
+          <BookCardMenu :book="book" />
         </template>
       </el-dropdown>
     </div>
@@ -142,9 +162,15 @@ const handleDropdownCommand = (command: string) => {
 .book-card {
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s;
+  height: 100%;
+  box-sizing: border-box;
 }
 .book-card:hover {
   transform: translateY(-2 * @h);
+}
+:deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
 }
 .book-cover {
   aspect-ratio: 3/4;
@@ -156,6 +182,7 @@ const handleDropdownCommand = (command: string) => {
   align-items: center;
   justify-content: center;
   position: relative;
+  flex-shrink: 0;
 }
 .cover-img {
   width: 100%;
@@ -214,17 +241,9 @@ const handleDropdownCommand = (command: string) => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.book-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: @tag-gap;
-  margin-top: @gap-xs;
-}
-.book-tag {
-  font-size: @font-xs;
-}
 .book-actions {
-  margin-top: @actions-margin-top;
+  margin-top: auto;
+  padding-top: @actions-margin-top;
   display: flex;
   align-items: center;
   gap: @gap-xs;

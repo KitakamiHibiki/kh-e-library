@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Reading, Collection, Plus } from '@element-plus/icons-vue'
-import { getBooks, deleteBook, reprocessBook, getSettings, updateBook, getDownloadUrl, getTags, createTag, addBookTag, removeBookTag, getSystemStatus, checkUpdate, getUpdateStatus, startUpdate } from '@/api'
+import { getBooks, deleteBook, reprocessBook, getSettings, updateBook, getCoverUrl, getDownloadUrl, getTags, createTag, addBookTag, removeBookTag, getSystemStatus, checkUpdate, getUpdateStatus, startUpdate } from '@/api'
 import type { Book, Tag, UpdateCheckResult } from '@/types/book'
 import { useI18n } from 'vue-i18n'
 import BookCard from '@/components/BookCard.vue'
+import BookCardMenu from '@/components/BookCardMenu.vue'
 import UploadBookDialog from '@/components/UploadBookDialog.vue'
+import { useCardDropdownClose } from '@/composables/useCardDropdownClose'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -315,12 +317,110 @@ const handleUpdateReadStatus = async (id: number, status: string) => {
   }
 }
 
+// "图书信息" dialog: shows the clicked book's metadata straight from the list
+// item (the list returns full Book objects, no extra request needed).
+const bookInfoDialogVisible = ref(false)
+const bookInfoBookId = ref(0)
+const bookInfoBook = computed(() => books.value.find(b => b.id === bookInfoBookId.value) ?? null)
+
 const handleBookInfo = (id: number) => {
-  ElMessage.info(`Book info for ID: ${id}`)
+  bookInfoBookId.value = id
+  bookInfoDialogVisible.value = true
+}
+
+const statusLabelFor = (status: string) => {
+  switch (status) {
+    case 'reading':
+      return t('bookShelf.reading')
+    case 'finished':
+      return t('bookShelf.finished')
+    default:
+      return t('bookShelf.unread')
+  }
+}
+
+const formatDateTime = (ts: number) => {
+  if (!ts) return '-'
+  const d = new Date(ts * 1000)
+  return d.toString() === 'Invalid Date' ? '-' : d.toLocaleString()
 }
 
 const handleExportBook = (id: number) => {
   window.open(getDownloadUrl(id), '_blank')
+}
+
+// Right-click context menu for book cards. A single shared, virtual-triggering
+// dropdown anchored at the cursor — one instance means only one context menu can
+// ever be open, and the dropdown's outside-click handling closes it on any other
+// mouse interaction.
+const ctxMenu = ref<{ id: number; x: number; y: number } | null>(null)
+const ctxDropdown = ref()
+// Close the shared context menu on right-clicks elsewhere (left-clicks already
+// close it natively; right-clicks do not fire a "click" event).
+const { register: registerDropdownClose } = useCardDropdownClose()
+let unregisterCtx: (() => void) | null = null
+const ctxVirtualRef = ref<{
+  getBoundingClientRect: () => DOMRect
+  contextElement?: Element
+} | null>(null)
+const ctxBook = computed(() => {
+  const id = ctxMenu.value?.id
+  return id ? books.value.find(b => b.id === id) ?? null : null
+})
+
+const handleContextMenu = async (payload: { id: number; x: number; y: number }) => {
+  const { x, y } = payload
+  ctxMenu.value = payload
+  ctxVirtualRef.value = {
+    getBoundingClientRect: () =>
+      ({
+        width: 0,
+        height: 0,
+        left: x,
+        top: y,
+        right: x,
+        bottom: y,
+        x,
+        y,
+        toJSON: () => ({}),
+      } as DOMRect),
+    contextElement: document.body,
+  }
+  // Let the dropdown's virtual reference update before opening.
+  await nextTick()
+  ctxDropdown.value?.handleOpen?.()
+}
+
+const handleCtxCommand = (command: string) => {
+  const id = ctxMenu.value?.id
+  if (!id) return
+  switch (command) {
+    case 'read':
+      handleRead(id)
+      break
+    case 'bookInfo':
+      handleBookInfo(id)
+      break
+    case 'markFinished':
+      handleUpdateReadStatus(id, 'finished')
+      break
+    case 'markUnread':
+      handleUpdateReadStatus(id, 'unread')
+      break
+    case 'addToShelf':
+      openShelfDialog(id)
+      break
+    case 'export':
+      handleExportBook(id)
+      break
+    case 'delete':
+      handleDelete(id)
+      break
+  }
+}
+
+const handleCtxVisibleChange = (visible: boolean) => {
+  if (!visible) ctxMenu.value = null
 }
 
 const openShelfDialog = async (id: number) => {
@@ -411,6 +511,7 @@ onMounted(async () => {
   await fetchBooks()
   fetchShelves()
   pollTimer = setInterval(pollProcessing, 2000)
+  unregisterCtx = registerDropdownClose(() => ctxDropdown.value?.handleClose?.())
   // Fire-and-forget: load the version badge and update indicator without
   // blocking the bookshelf render.
   getSystemStatus()
@@ -423,6 +524,7 @@ onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer)
   if (pollTimer) clearInterval(pollTimer)
   stopUpdatePoll()
+  unregisterCtx?.()
 })
 </script>
 
@@ -519,6 +621,7 @@ onBeforeUnmount(() => {
               @book-info="handleBookInfo"
               @add-to-shelf="openShelfDialog"
               @export-book="handleExportBook"
+              @contextmenu="handleContextMenu"
             />
           </el-col>
         </el-row>
@@ -648,8 +751,96 @@ onBeforeUnmount(() => {
       </template>
     </el-dialog>
 
+    <!-- Book Info Dialog -->
+    <el-dialog v-model="bookInfoDialogVisible" :title="t('bookInfo.title')" width="520px" :append-to-body="true">
+      <div v-if="bookInfoBook" class="book-info">
+        <div class="book-info-header">
+          <div class="book-info-cover">
+            <img v-if="bookInfoBook.cover" :src="getCoverUrl(bookInfoBook.id)" class="book-info-cover-img" />
+            <span v-else-if="bookInfoBook.file_type === 'pdf'" class="book-info-cover-badge pdf-badge">PDF</span>
+            <span v-else class="book-info-cover-badge">+</span>
+          </div>
+          <div class="book-info-main">
+            <h3 class="book-info-title">{{ bookInfoBook.title }}</h3>
+            <p class="book-info-author">{{ bookInfoBook.author || t('bookShelf.unknownAuthor') }}</p>
+            <div v-if="bookInfoBook.tags?.length" class="book-info-tags">
+              <el-tag v-for="tag in bookInfoBook.tags" :key="tag" size="small">{{ tag }}</el-tag>
+            </div>
+          </div>
+        </div>
+        <div class="book-info-meta">
+          <div class="book-info-row">
+            <span class="book-info-label">{{ t('bookInfo.status') }}</span>
+            <span class="book-info-value">
+              <span class="book-info-status-dot" :class="`book-info-status-dot--${bookInfoBook.read_status}`"></span>
+              {{ statusLabelFor(bookInfoBook.read_status) }}
+            </span>
+          </div>
+          <div class="book-info-row">
+            <span class="book-info-label">{{ t('bookInfo.fileType') }}</span>
+            <span class="book-info-value">{{ bookInfoBook.file_type?.toUpperCase() }}</span>
+          </div>
+          <div class="book-info-row">
+            <span class="book-info-label">{{ t('bookInfo.fileSize') }}</span>
+            <span class="book-info-value">{{ formatFileSize(bookInfoBook.file_size) }}</span>
+          </div>
+          <div class="book-info-row">
+            <span class="book-info-label">{{ bookInfoBook.file_type === 'pdf' ? t('bookInfo.pages') : t('bookInfo.chapterCount') }}</span>
+            <span class="book-info-value">{{ bookInfoBook.pages || '-' }}</span>
+          </div>
+          <div class="book-info-row" v-if="bookInfoBook.isbn">
+            <span class="book-info-label">{{ t('bookInfo.isbn') }}</span>
+            <span class="book-info-value">{{ bookInfoBook.isbn }}</span>
+          </div>
+          <div class="book-info-row" v-if="bookInfoBook.publisher">
+            <span class="book-info-label">{{ t('bookInfo.publisher') }}</span>
+            <span class="book-info-value">{{ bookInfoBook.publisher }}</span>
+          </div>
+          <div class="book-info-row" v-if="bookInfoBook.language">
+            <span class="book-info-label">{{ t('bookInfo.language') }}</span>
+            <span class="book-info-value">{{ bookInfoBook.language }}</span>
+          </div>
+          <div class="book-info-row">
+            <span class="book-info-label">{{ t('bookInfo.created') }}</span>
+            <span class="book-info-value">{{ formatDateTime(bookInfoBook.created_at) }}</span>
+          </div>
+          <div class="book-info-row">
+            <span class="book-info-label">{{ t('bookInfo.updated') }}</span>
+            <span class="book-info-value">{{ formatDateTime(bookInfoBook.updated_at) }}</span>
+          </div>
+        </div>
+        <div v-if="bookInfoBook.description" class="book-info-desc">
+          <div class="book-info-label">{{ t('bookInfo.description') }}</div>
+          <p class="book-info-desc-text">{{ bookInfoBook.description }}</p>
+        </div>
+      </div>
+      <template #footer>
+        <div class="book-info-footer">
+          <el-button @click="bookInfoDialogVisible = false">{{ t('bookInfo.close') }}</el-button>
+          <el-button @click="handleExportBook(bookInfoBookId)">{{ t('bookInfo.download') }}</el-button>
+          <el-button type="primary" @click="handleRead(bookInfoBookId)">{{ t('bookInfo.read') }}</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- Upload Book Dialog -->
     <UploadBookDialog v-model="uploadDialogVisible" @uploaded="onUploaded" />
+
+    <!-- Shared right-click context menu for book cards, anchored at the cursor -->
+    <el-dropdown
+      v-if="ctxBook"
+      ref="ctxDropdown"
+      :virtual-triggering="true"
+      :virtual-ref="ctxVirtualRef"
+      placement="bottom-start"
+      trigger="click"
+      @command="handleCtxCommand"
+      @visible-change="handleCtxVisibleChange"
+    >
+      <template #dropdown>
+        <BookCardMenu :book="ctxBook" />
+      </template>
+    </el-dropdown>
   </el-container>
 </template>
 
@@ -793,6 +984,7 @@ onBeforeUnmount(() => {
 }
 .book-col {
   margin-bottom: @gap-lg;
+  display: flex;
 }
 .pagination-wrapper {
   margin-top: @gap-lg;
@@ -853,5 +1045,120 @@ onBeforeUnmount(() => {
 }
 .version-error {
   margin-top: @gap-sm;
+}
+
+/* Book Info Dialog */
+.book-info-header {
+  display: flex;
+  gap: @gap-lg;
+  align-items: flex-start;
+}
+.book-info-cover {
+  flex-shrink: 0;
+  width: calc(96 * @w);
+  aspect-ratio: 3/4;
+  background: var(--bg-secondary, #f5f5f5);
+  border-radius: @cover-radius;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.book-info-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.book-info-cover-badge {
+  font-size: 2rem;
+  color: var(--text-secondary, #999);
+}
+.book-info-cover-badge.pdf-badge {
+  color: #e74c3c;
+  font-size: @font-md;
+  font-weight: bold;
+}
+.book-info-main {
+  flex: 1;
+  min-width: 0;
+}
+.book-info-title {
+  margin: 0 0 @gap-xs;
+  font-size: @font-lg;
+  word-break: break-word;
+}
+.book-info-author {
+  margin: 0;
+  color: var(--text-secondary, #909399);
+  font-size: @font-sm;
+}
+.book-info-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: @tag-gap;
+  margin-top: @gap-sm;
+}
+.book-info-meta {
+  margin-top: @gap-lg;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: @gap-sm @gap-lg;
+}
+.book-info-row {
+  display: flex;
+  align-items: baseline;
+  gap: @gap-xs;
+  font-size: @font-sm;
+  min-width: 0;
+}
+.book-info-label {
+  flex-shrink: 0;
+  width: calc(56 * @w);
+  color: var(--text-secondary, #909399);
+}
+.book-info-value {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+  display: flex;
+  align-items: center;
+  gap: calc(4 * @w);
+  color: var(--text-primary, #303133);
+}
+.book-info-status-dot {
+  width: calc(8 * @w);
+  height: calc(8 * @w);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.book-info-status-dot--unread {
+  background: #909399;
+}
+.book-info-status-dot--reading {
+  background: #409eff;
+}
+.book-info-status-dot--finished {
+  background: #67c23a;
+}
+.book-info-desc {
+  margin-top: @gap-lg;
+  padding: @gap-sm @gap-md;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: @radius-sm;
+  background: var(--bg-secondary, #f5f5f5);
+}
+.book-info-desc-text {
+  margin: @gap-xs 0 0;
+  font-size: @font-sm;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: calc(180 * @h);
+  overflow-y: auto;
+  color: var(--text-primary, #303133);
+}
+.book-info-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: @gap-xs;
 }
 </style>

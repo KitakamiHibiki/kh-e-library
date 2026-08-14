@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple open-book glyph used as the adaptive launcher foreground. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="30"
+        android:translateY="27">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M24,18 L24,48 C24,48 16,44 8,46 L8,18 C16,16 24,18 24,18 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M24,18 L24,48 C24,48 32,44 40,46 L40,18 C32,16 24,18 24,18 Z" />
+        <path
+            android:fillColor="#B7C4F0"
+            android:pathData="M24,20 L24,46 C24,46 17,42.5 10,44 L10,20 C17,18.5 24,20 24,20 Z" />
+    </group>
+</vector>
