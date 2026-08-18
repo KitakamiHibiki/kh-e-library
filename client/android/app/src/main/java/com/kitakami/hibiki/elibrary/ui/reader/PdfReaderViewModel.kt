@@ -54,9 +54,8 @@ class PdfReaderViewModel(
             loading = true
             try {
                 val target = File(context.cacheDir, "reader_${bookId}.pdf")
-                if (!target.exists() || target.length() == 0L) {
-                    container.repository.downloadReadToFile(bookId, target)
-                }
+                // Chunked download: skips a complete cache, resumes a partial one.
+                container.repository.downloadReadToFile(bookId, target)
                 file = target
                 // Restore last page.
                 val progress = container.repository.getProgress(bookId)

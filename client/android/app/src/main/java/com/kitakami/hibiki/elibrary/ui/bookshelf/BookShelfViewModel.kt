@@ -102,6 +102,7 @@ class BookShelfViewModel(private val container: AppContainer) : ViewModel() {
 
     init {
         loadTags()
+        load(reset = true)
     }
 
     fun consumeMessage() {

@@ -37,7 +37,10 @@ Thumbs.db
 Desktop.ini
 
 # --- Project data (local dev) ---
-**/data/
+# Only the backend's local data dir (books + sqlite db) is ignored. A bare
+# `**/data/` would also swallow client/android/.../data/ (the app's data layer),
+# so anchor it to the backend directory.
+/backend/data/
 *.db
 *.db-journal
 *.db-wal

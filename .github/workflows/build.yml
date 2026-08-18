@@ -162,7 +162,9 @@ jobs:
       - name: Check Android source
         id: check
         run: |
-          if [ -f client/android/build.gradle ] || [ -f client/android/app/build.gradle ]; then
+          # Gradle DSL can be Groovy (.gradle) or Kotlin (.gradle.kts).
+          if [ -f client/android/build.gradle.kts ] || [ -f client/android/app/build.gradle.kts ] || \
+             [ -f client/android/build.gradle ] || [ -f client/android/app/build.gradle ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"

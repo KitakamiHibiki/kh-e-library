@@ -60,9 +60,8 @@ class EpubReaderViewModel(
             loading = true
             try {
                 val epub = File(context.cacheDir, "reader_${bookId}.epub")
-                if (!epub.exists() || epub.length() == 0L) {
-                    container.repository.downloadReadToFile(bookId, epub)
-                }
+                // Chunked download: skips a complete cache, resumes a partial one.
+                container.repository.downloadReadToFile(bookId, epub)
                 val extractDir = File(context.cacheDir, "reader_${bookId}")
                 val parsed = EpubParser.parse(epub, extractDir)
                 book = parsed

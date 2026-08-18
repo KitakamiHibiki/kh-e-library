@@ -335,6 +335,10 @@ func (h *BookHandler) Read(c *gin.Context) {
 
 // Download handles GET /books/download?id=
 // Triggers browser download (Content-Disposition: attachment).
+// Uses http.ServeContent so clients can fetch the file in byte ranges (206)
+// via the Range header — needed for chunked downloads behind a tunnel with a
+// per-request size limit. Clients without a Range header still get the full
+// file (200), so browser "save as" behavior is unchanged.
 func (h *BookHandler) Download(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Query("id"), 10, 64)
 	if err != nil {
@@ -361,8 +365,9 @@ func (h *BookHandler) Download(c *gin.Context) {
 	filename := book.Title + ext
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	c.Header("Content-Type", "application/octet-stream")
-	// No Range support for downloads — return full file
-	c.DataFromReader(http.StatusOK, book.FileSize, "application/octet-stream", reader, nil)
+	// ServeContent handles Range (206) while sending the full file (200) to
+	// clients that don't request a range. The preset headers above are kept.
+	http.ServeContent(c.Writer, c.Request, book.BookFile, time.Time{}, reader)
 }
 
 // Cover handles GET /books/cover?id=
